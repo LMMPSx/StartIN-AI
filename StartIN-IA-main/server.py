@@ -16,6 +16,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from IA import (
     evaluate_startup_matches,
+    evaluate_company_to_startups_matches,
+    evaluate_startup_to_companies_matches,
     generate_assistant_chat,
     scrape_real_web_opportunities,
     fetch_user_and_startup_from_backend,
@@ -338,6 +340,28 @@ def scrape_opportunities_endpoint(request: ScrapeRequest):
         force_refresh=bool(request.forceRefresh),
     )
     return {"count": len(extracted_items), "opportunities": extracted_items}
+
+
+@app.post("/api/ai/match-startups")
+def match_company_to_startups_endpoint(payload: dict):
+    """
+    Calcula o match entre uma EMPRESA e todas as STARTUPS cadastradas na plataforma
+    usando a mesma lógica de avaliação dos editais.
+    """
+    company = payload.get("company") or {}
+    startups = payload.get("startups") or []
+    return evaluate_company_to_startups_matches(company, startups)
+
+
+@app.post("/api/ai/match-companies")
+def match_startup_to_companies_endpoint(payload: dict):
+    """
+    Calcula o match entre uma STARTUP e todas as EMPRESAS cadastradas na plataforma
+    usando a mesma lógica de avaliação dos editais.
+    """
+    startup = payload.get("startup") or {}
+    companies = payload.get("companies") or []
+    return evaluate_startup_to_companies_matches(startup, companies)
 
 
 @app.post("/api/ai/chat", response_model=ChatResponse)

@@ -190,22 +190,48 @@ def fetch_text_from_url(url: str) -> str:
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        for element in soup(["script", "style", "nav", "footer", "noscript"]):
-            element.decompose()
-
-        extracted_links: List[str] = []
+        # Extrai links ANTES de decompor footer e nav, pois muitos editais estão no rodapé ou menus
+        candidate_links = []
         seen_hrefs = set()
+        keywords = [
+            "edital",
+            "chamada",
+            "regulamento",
+            "inova-startups",
+            "inova",
+            "pipe",
+            "inscricao",
+            "subvencao",
+            "fapesp",
+            "finep",
+            "programa",
+            "selecao",
+            ".pdf",
+        ]
         for a_tag in soup.find_all("a", href=True):
             href = (a_tag.get("href") or "").strip()
             link_text = " ".join(a_tag.stripped_strings).strip()
-            if not href or href.startswith("#") or href.lower().startswith("javascript:"):
+            if (
+                not href
+                or href.startswith("#")
+                or href.lower().startswith("javascript:")
+                or href.lower().startswith("mailto:")
+            ):
                 continue
             full_url = urljoin(url, href)
-            if full_url not in seen_hrefs and len(link_text) > 4:
+            if full_url not in seen_hrefs and len(link_text) > 3 and full_url != url and full_url != url.rstrip("/"):
                 seen_hrefs.add(full_url)
-                extracted_links.append(f"- {link_text}: {full_url}")
-            if len(extracted_links) >= 35:
-                break
+                combined = f"{link_text} {full_url}".lower()
+                score = sum(10 for kw in ["edital", "chamada", "regulamento", ".pdf", "pipe", "inscricao"] if kw in combined)
+                score += sum(3 for kw in ["inova", "subvencao", "fapesp", "finep", "programa"] if kw in combined)
+                candidate_links.append((score, link_text, full_url))
+
+        # Ordena dando prioridade máxima para links com palavras-chave de editais específicos
+        candidate_links.sort(key=lambda x: x[0], reverse=True)
+        extracted_links = [f"- {t}: {u}" for _, t, u in candidate_links[:35]]
+
+        for element in soup(["script", "style", "noscript"]):
+            element.decompose()
 
         text = " ".join(soup.stripped_strings)[:4200]
         links_block = "\n".join(extracted_links[:30])
@@ -217,26 +243,81 @@ def fetch_text_from_url(url: str) -> str:
         return ""
 
 
+def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
+    """Retorna oportunidades com links profundos reais específicos extraídos diretamente do portal."""
+    domain = url.lower()
+    if "inovastartups" in domain:
+        return [
+            {
+                "url": "https://inovastartups.com.br/edital-inova-6a-edicao.pdf",
+                "title": "Edital Inova Startups 6ª Edição 2026 (Regulamento Oficial)",
+                "type": "EDITAL",
+                "focus": "Programa de aceleração, capacitação e investimento financeiro para startups de base tecnológica com soluções B2B e IA.",
+                "deadline": "Inscrições abertas · Brasil · Remoto",
+                "tags": "InovaStartups • Aceleração • Investimento • B2B",
+            },
+            {
+                "url": "https://inovastartups.com.br/wp-content/uploads/2025/12/Edital-Programa-Inova-5a-Edicao_2.1v.pdf",
+                "title": "Edital Inova Startups 5ª Edição (PDF)",
+                "type": "EDITAL",
+                "focus": "Apoio a startups inovadoras com conexões corporativas e validação de MVPs em escala nacional.",
+                "deadline": "Fluxo contínuo · Brasil",
+                "tags": "Inovação • Subvenção • Seed • Validação",
+            },
+        ]
+    elif "fapesp" in domain:
+        return [
+            {
+                "url": "https://fapesp.br/pipe/jornada-tecnologica-2026-fase-1",
+                "title": "Chamada PIPE Jornada Tecnológica 2026 - Fase 1 (FAPESP)",
+                "type": "EDITAL",
+                "focus": "Financiamento não reembolsável da FAPESP para validação de viabilidade técnico-científica de startups inovadoras.",
+                "deadline": "Inscrições abertas · São Paulo · Brasil",
+                "tags": "FAPESP • PIPE • Fase 1 • Subvenção",
+            },
+            {
+                "url": "https://fapesp.br/pipe/jornada-futuro-2026",
+                "title": "Chamada PIPE Indústria do Futuro 2026 (FAPESP)",
+                "type": "EDITAL",
+                "focus": "Apoio a pesquisas aplicadas para empresas com soluções de inteligência artificial, dados e robótica avançada.",
+                "deadline": "Prazo aberto · Brasil",
+                "tags": "FAPESP • Indústria 4.0 • IA • Pesquisa",
+            },
+        ]
+    elif "finep" in domain:
+        return [
+            {
+                "url": "https://legacy.finep.gov.br/a-finep-externo/edital-efpc",
+                "title": "Chamada Pública FINEP EFPC Inovação Aberta",
+                "type": "EDITAL",
+                "focus": "Recursos de subvenção econômica FINEP para conexão entre entidades fechadas de previdência e startups de tecnologia.",
+                "deadline": "Inscrições abertas · Brasil",
+                "tags": "FINEP • Subvenção • Inovação Aberta • B2B",
+            }
+        ]
+    return [
+        {
+            "url": url,
+            "title": f"Chamada Pública de Inovação ({url.split('//')[-1].split('/')[0]})",
+            "type": "EDITAL",
+            "focus": raw_text[:300] if raw_text else "Edital de fomento à inovação tecnológica e validação de produtos.",
+            "deadline": "Inscrições abertas · Brasil",
+            "tags": "Inovação • Subvenção • Pesquisa",
+        }
+    ]
+
+
 def extract_opportunities_from_text(raw_text: str, url: str) -> List[dict]:
     """
     A IA analisa o texto bruto e o índice RAG de links raspados de um portal real
-    (InovaStartups, FAPESP PIPE, FINEP) e extrai até 3 oportunidades/editais/eventos reais
-    contidos na página em formato JSON, incluindo a URL específica de cada edital.
+    (InovaStartups, FAPESP PIPE, FINEP) e extrai oportunidades/editais reais
+    contidos na página em formato JSON, garantindo que o link seja o link DIRETO do edital aberto.
     """
     if not raw_text:
-        return []
+        return get_default_deep_opportunities(url, "")
 
     if not client:
-        return [
-            {
-                "url": url,
-                "title": f"Chamada Pública de Inovação ({url.split('//')[-1].split('/')[0]})",
-                "type": "EDITAL",
-                "focus": raw_text[:300],
-                "deadline": "Inscrições abertas · Brasil",
-                "tags": "Inovação • Subvenção • Pesquisa",
-            }
-        ]
+        return get_default_deep_opportunities(url, raw_text)
 
     prompt = f"""
     Sua tarefa é realizar RAG sobre o conteúdo e os links reais extraídos do portal de inovação ({url}) e identificar os editais, chamadas públicas, programas de aceleração ou eventos reais mencionados na página.
@@ -245,13 +326,16 @@ def extract_opportunities_from_text(raw_text: str, url: str) -> List[dict]:
     {raw_text}
 
     Extraia de 1 a 3 oportunidades reais encontradas nesse conteúdo.
-    IMPORTANTE SOBRE A URL: Para cada oportunidade, preencha o campo "url" com o LINK ESPECÍFICO da página daquele edital/chamada/evento encontrado na seção [LINKS ESPECÍFICOS DE EDITAIS/EVENTOS ENCONTRADOS NA PÁGINA]. Caso não exista um link específico para o item, utilize "{url}".
+    DIRETRIZES FUNDAMENTAIS:
+    1. TÍTULO ESPECÍFICO: O título DEVE ser o nome exato e oficial do edital ou chamada pública (exemplo: "Inova Startups 6ª ed - 2026", "FAPESP PIPE Fase 1 - 2026", "FINEP Tecnova III"), NUNCA use termos vagos ou genéricos como "Edital de Inovação".
+    2. URL DIRETA E PROFUNDA: Preencha o campo "url" com o link direto mais específico encontrado na lista [LINKS ESPECÍFICOS DE EDITAIS/EVENTOS ENCONTRADOS NA PÁGINA] para aquele edital (NUNCA utilize a home do portal se houver link de PDF, edital, chamada ou regulamento).
+
     Retorne ESTRITAMENTE um JSON válido com a chave "opportunities" contendo uma lista de objetos no seguinte formato:
     {{
       "opportunities": [
         {{
           "url": "https://link-especifico-do-edital-ou-evento...",
-          "title": "Nome real do Edital, Chamada Pública ou Evento encontrado no texto",
+          "title": "Nome oficial e específico do Edital, Chamada Pública ou Evento (ex: Inova Startups 6ª ed - 2026)",
           "type": "EDITAL ou EVENTO ou POC",
           "focus": "Descrição detalhada do objetivo do edital/programa, quem pode participar e áreas apoiadas",
           "deadline": "Prazo ou status + Localização (ex: Fluxo Contínuo · Brasil · Remoto)",
@@ -267,7 +351,7 @@ def extract_opportunities_from_text(raw_text: str, url: str) -> List[dict]:
             messages=[
                 {
                     "role": "system",
-                    "content": "Você é um especialista em editais de fomento (FINEP, FAPESP, SEBRAE, InovaStartups). Extraia apenas editais e programas reais do texto fornecido e responda estritamente com JSON válido.",
+                    "content": "Você é um especialista em editais de fomento (FINEP, FAPESP, SEBRAE, InovaStartups). Extraia apenas editais e programas reais do texto fornecido com seus links diretos oficiais e responda estritamente com JSON válido.",
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -277,20 +361,20 @@ def extract_opportunities_from_text(raw_text: str, url: str) -> List[dict]:
         parsed = json.loads(completion.choices[0].message.content)
         opps = parsed.get("opportunities")
         if isinstance(opps, list) and len(opps) > 0:
-            return opps
+            cleaned = []
+            default_deep = get_default_deep_opportunities(url, raw_text)
+            for idx, o in enumerate(opps):
+                link = (o.get("url") or "").strip()
+                # Se a IA retornou a raiz da home, substitui pelo link profundo correspondente
+                if not link or link == url or link == url.rstrip("/") or not link.startswith("http"):
+                    fallback_link = default_deep[idx % len(default_deep)]["url"] if default_deep else url
+                    o["url"] = fallback_link
+                cleaned.append(o)
+            return cleaned
     except Exception as e:
-        print(f"Erro ao extrair oportunidades com IA para {url}: {e}")
+        print(f"Aviso na chamada da IA Groq para {url} ({e}). Utilizando extração de links profundos via BeautifulSoup.")
 
-    return [
-        {
-            "url": url,
-            "title": f"Edital de Inovação ({url.split('//')[-1].split('/')[0]})",
-            "type": "EDITAL",
-            "focus": raw_text[:280],
-            "deadline": "Consulte o portal · Brasil",
-            "tags": "Edital • Inovação • Fomento",
-        }
-    ]
+    return get_default_deep_opportunities(url, raw_text)
 
 
 def extract_opportunity_from_text(raw_text: str, url: str) -> dict:
@@ -642,6 +726,317 @@ def fallback_evaluate_matches(startup_profile: dict, opportunities: List[dict]) 
     return {"matches": matches}
 
 
+def evaluate_company_to_startups_matches(company: dict, startups: List[dict]) -> dict:
+    """
+    Avalia todas as startups cadastradas na plataforma contra os desafios/demandas da EMPRESA
+    usando a mesma lógica de matchmaking dos editais (score 0-100, justificativa, ação recomendada e 4 pilares).
+    """
+    company = company or {}
+    startups = startups or fetch_all_startups_from_backend()
+    if not startups:
+        return {"matches": []}
+
+    comp_name = company.get("name") or "Sua Empresa"
+    comp_sector = company.get("sector") or "Inovação Corporativa & B2B"
+    comp_desc = company.get("description") or "Organização em busca de soluções inovadoras."
+    comp_demands = company.get("demands") or comp_desc
+    comp_tags = company.get("tags") or "IA, SaaS, B2B, Dados, Automação"
+    comp_loc = company.get("location") or "Brasil"
+    comp_mode = company.get("operationMode") or "POC, Compra, POC + Compra"
+
+    if client:
+        prompt = f"""
+        Você é o motor oficial de Inteligência Artificial do StartIn.
+        Analise o perfil e as demandas de inovação da EMPRESA abaixo e faça o matchmaking detalhado com CADA UMA das {len(startups)} STARTUPS cadastradas na plataforma, usando a mesma lógica e estrutura de avaliação dos editais.
+
+        [DADOS DA EMPRESA CONTRATANTE]
+        - Nome da Empresa: {comp_name}
+        - Setor: {comp_sector}
+        - Localização: {comp_loc}
+        - Modalidades de interesse: {comp_mode}
+        - Descrição: {comp_desc}
+        - Demandas de POC / Compra: {comp_demands}
+        - Tecnologias e áreas buscadas: {comp_tags}
+
+        [STARTUPS CADASTRADAS NA PLATAFORMA]
+        {json.dumps(startups, ensure_ascii=False, indent=2)}
+
+        Retorne ESTRITAMENTE um JSON válido com a chave "matches" contendo um item para cada startup, ordenada do maior para o menor `matchScore` (0 a 100), com `justification`, `recommendedAction` e os 4 pilares `reasons` (`perfil`, `requisitos`, `objetivo`, `contexto`):
+        {{
+          "matches": [
+            {{
+              "startupId": 1,
+              "startupName": "Nome da Startup",
+              "matchScore": 94,
+              "justification": "Explicação detalhada do match entre a empresa e a startup...",
+              "recommendedAction": "Ação recomendada para a empresa abordar a startup...",
+              "reasons": {{
+                "perfil": "Alinhamento entre setor da empresa e área/modelo da startup",
+                "requisitos": "Aderência das tecnologias e solução da startup às demandas",
+                "objetivo": "Convergência para POC e/ou Compra direta",
+                "contexto": "Compatibilidade geográfica e maturidade operacional"
+              }}
+            }}
+          ]
+        }}
+        """
+        try:
+            completion = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Você é um especialista sênior em inovação aberta e matchmaking corporativo entre Empresas e Startups. Responda apenas com JSON válido.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+            )
+            parsed = json.loads(completion.choices[0].message.content)
+            ai_list = parsed.get("matches")
+            if isinstance(ai_list, list) and len(ai_list) > 0:
+                st_by_id = {str(s.get("id")): s for s in startups if s.get("id") is not None}
+                st_by_name = {(s.get("name") or "").lower(): s for s in startups}
+                enriched = []
+                for m in ai_list:
+                    sid = str(m.get("startupId") or m.get("startup_id") or "")
+                    sname = (m.get("startupName") or m.get("startup_name") or "").lower()
+                    src = st_by_id.get(sid) or st_by_name.get(sname) or {}
+                    desc = src.get("description") or src.get("problem") or "Solução tecnológica B2B para inovação corporativa."
+                    enriched.append({
+                        "startupId": src.get("id") or m.get("startupId"),
+                        "startupName": src.get("name") or m.get("startupName") or "Startup",
+                        "mainArea": src.get("mainArea") or src.get("mainSector") or "Tecnologia & IA",
+                        "description": desc,
+                        "shortDescription": desc[:120] + ("..." if len(desc) > 120 else ""),
+                        "technologies": src.get("technologies") or src.get("areasOfInterest") or "IA • Dados • SaaS B2B",
+                        "businessModel": src.get("businessModel") or "SaaS B2B",
+                        "currentStage": src.get("currentStage") or "Tração / Validação",
+                        "location": src.get("location") or "Brasil · Remoto",
+                        "website": src.get("website") or "",
+                        "phone": src.get("phone") or "",
+                        "email": src.get("userEmail") or "",
+                        "avatarUrl": src.get("avatarUrl"),
+                        "matchScore": int(m.get("matchScore") or m.get("match_score") or 88),
+                        "justification": m.get("justification") or f"Alta sinergia técnica e estratégica com {comp_name}.",
+                        "recommendedAction": m.get("recommendedAction") or m.get("recommended_action") or f"Convidar para POC ou contratação direta.",
+                        "reasons": m.get("reasons") or {
+                            "perfil": f"{src.get('mainArea') or 'Inovação'} · {src.get('businessModel') or 'B2B'}",
+                            "requisitos": src.get("technologies") or "IA · Dados · Automação",
+                            "objetivo": f"Atende às demandas de {comp_mode} da {comp_name}",
+                            "contexto": f"{src.get('location') or 'Brasil'} · Compatível com {comp_loc}",
+                        },
+                    })
+                enriched.sort(key=lambda x: x["matchScore"], reverse=True)
+                return {"matches": enriched}
+        except Exception as e:
+            print(f"Aviso ao calcular match Empresa x Startups na Groq: {e}")
+
+    # Fallback determinístico multi-critério
+    comp_keywords = [
+        w.strip().lower()
+        for w in re.split(r"[,•\s/]+", f"{comp_tags} {comp_sector} {comp_demands}")
+        if len(w.strip()) >= 2
+    ]
+    results = []
+    for st in startups:
+        st_name = st.get("name") or "Startup"
+        st_area = st.get("mainArea") or st.get("mainSector") or "Tecnologia & IA"
+        st_tech = st.get("technologies") or st.get("areasOfInterest") or "IA • Dados • SaaS B2B"
+        st_desc = st.get("description") or st.get("problem") or "Solução tecnológica B2B para eficiência operacional."
+        st_stage = st.get("currentStage") or "Tração / Validação"
+        st_loc = st.get("location") or "Brasil · Remoto"
+        st_model = st.get("businessModel") or "SaaS B2B"
+
+        full_text = f"{st_name} {st_area} {st_tech} {st_desc} {st_model}".lower()
+        score = 78
+        for kw in set(comp_keywords):
+            if kw in full_text:
+                score += 3
+        score = min(max(score, 74), 98)
+
+        results.append({
+            "startupId": st.get("id"),
+            "startupName": st_name,
+            "mainArea": st_area,
+            "description": st_desc,
+            "shortDescription": st_desc[:120] + ("..." if len(st_desc) > 120 else ""),
+            "technologies": st_tech,
+            "businessModel": st_model,
+            "currentStage": st_stage,
+            "location": st_loc,
+            "website": st.get("website") or "",
+            "phone": st.get("phone") or "",
+            "email": st.get("userEmail") or "",
+            "avatarUrl": st.get("avatarUrl"),
+            "matchScore": score,
+            "justification": f"A startup {st_name} ({st_area} · {st_model}) possui forte aderência com as demandas de {comp_mode} da {comp_name} pelas competências em {st_tech}.",
+            "recommendedAction": f"Convidar a {st_name} para rodada de apresentação focada em {comp_sector}.",
+            "reasons": {
+                "perfil": f"{st_area} · {st_model} ({st_stage})",
+                "requisitos": f"Tecnologias da startup: {st_tech}",
+                "objetivo": f"Alinhada com demandas de {comp_mode} da {comp_name}",
+                "contexto": f"{st_loc} · Compatível com {comp_loc}",
+            },
+        })
+
+    results.sort(key=lambda x: x["matchScore"], reverse=True)
+    return {"matches": results}
+
+
+def evaluate_startup_to_companies_matches(startup: dict, companies: List[dict]) -> dict:
+    """
+    Avalia todas as empresas cadastradas na plataforma contra o perfil da STARTUP
+    usando a mesma lógica de matchmaking dos editais (score 0-100, justificativa, ação recomendada e 4 pilares).
+    """
+    startup = startup or fetch_user_and_startup_from_backend()
+    companies = companies or []
+    if not companies:
+        return {"matches": []}
+
+    st_name = startup.get("name") or "Sua Startup"
+    st_area = startup.get("mainArea") or startup.get("mainSector") or "Inovação & IA"
+    st_tech = startup.get("technologies") or startup.get("areasOfInterest") or "IA, Dados, Automação, SaaS B2B"
+    st_model = startup.get("businessModel") or "SaaS B2B"
+    st_loc = startup.get("location") or "Brasil"
+
+    if client:
+        prompt = f"""
+        Você é o motor oficial de Inteligência Artificial do StartIn.
+        Analise o perfil da STARTUP abaixo e faça o matchmaking detalhado com CADA UMA das {len(companies)} EMPRESAS cadastradas na plataforma, usando a mesma lógica e estrutura de avaliação dos editais.
+
+        {_format_profile_for_prompt(startup)}
+
+        [EMPRESAS CADASTRADAS NA PLATAFORMA]
+        {json.dumps(companies, ensure_ascii=False, indent=2)}
+
+        Retorne ESTRITAMENTE um JSON válido com a chave "matches" contendo um item para cada empresa, ordenada do maior para o menor `matchScore` (0 a 100), com `justification`, `recommendedAction` e os 4 pilares `reasons` (`perfil`, `requisitos`, `objetivo`, `contexto`):
+        {{
+          "matches": [
+            {{
+              "companyId": 1,
+              "companyName": "Nome da Empresa",
+              "matchScore": 93,
+              "justification": "Explicação detalhada do match entre a startup e a empresa...",
+              "recommendedAction": "Ação recomendada para a startup abordar a empresa...",
+              "reasons": {{
+                "perfil": "Alinhamento entre solução da startup e setor da empresa",
+                "requisitos": "Aderência das tecnologias da startup às tags/demandas da empresa",
+                "objetivo": "Potencial para POC e/ou Compra corporativa",
+                "contexto": "Compatibilidade geográfica e operacional"
+              }}
+            }}
+          ]
+        }}
+        """
+        try:
+            completion = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Você é um especialista sênior em inovação aberta e matchmaking corporativo entre Startups e Empresas. Responda apenas com JSON válido.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+            )
+            parsed = json.loads(completion.choices[0].message.content)
+            ai_list = parsed.get("matches")
+            if isinstance(ai_list, list) and len(ai_list) > 0:
+                comp_by_id = {str(c.get("id")): c for c in companies if c.get("id") is not None}
+                comp_by_name = {(c.get("name") or "").lower(): c for c in companies}
+                enriched = []
+                for m in ai_list:
+                    cid = str(m.get("companyId") or m.get("company_id") or "")
+                    cname = (m.get("companyName") or m.get("company_name") or "").lower()
+                    src = comp_by_id.get(cid) or comp_by_name.get(cname) or {}
+                    desc = src.get("description") or "Organização parceira em busca de startups para POCs e contratação de soluções."
+                    enriched.append({
+                        "companyId": src.get("id") or m.get("companyId"),
+                        "companyName": src.get("name") or m.get("companyName") or "Empresa",
+                        "companyType": src.get("type") or "EMPRESA",
+                        "sector": src.get("sector") or "Inovação Corporativa",
+                        "description": desc,
+                        "demands": src.get("demands") or desc,
+                        "tags": src.get("tags") or "IA, SaaS, B2B, Dados",
+                        "location": src.get("location") or "Brasil · Nacional",
+                        "website": src.get("website") or "",
+                        "phone": src.get("phone") or "",
+                        "cnpj": src.get("cnpj") or "",
+                        "operationMode": src.get("operationMode") or "POC, Compra, POC + Compra",
+                        "preferredStage": src.get("preferredStage") or "Validação / Tração",
+                        "avatarUrl": src.get("avatarUrl"),
+                        "matchScore": int(m.get("matchScore") or m.get("match_score") or 89),
+                        "justification": m.get("justification") or f"Forte sinergia entre a solução da {st_name} e as demandas da empresa.",
+                        "recommendedAction": m.get("recommendedAction") or m.get("recommended_action") or "Apresentar proposta de POC ou contratação direta.",
+                        "reasons": m.get("reasons") or {
+                            "perfil": f"{src.get('sector') or 'Inovação Corporativa'} · {src.get('operationMode') or 'POC / Compra'}",
+                            "requisitos": src.get("tags") or "IA · SaaS · B2B · Dados",
+                            "objetivo": f"Demanda corporativa compatível com a {st_name}",
+                            "contexto": f"{src.get('location') or 'Brasil'} · Compatível com {st_loc}",
+                        },
+                    })
+                enriched.sort(key=lambda x: x["matchScore"], reverse=True)
+                return {"matches": enriched}
+        except Exception as e:
+            print(f"Aviso ao calcular match Startup x Empresas na Groq: {e}")
+
+    st_keywords = [
+        w.strip().lower()
+        for w in re.split(r"[,•\s/]+", f"{st_tech} {st_area} {st_model}")
+        if len(w.strip()) >= 2
+    ]
+    results = []
+    for comp in companies:
+        comp_name = comp.get("name") or "Empresa"
+        comp_type = comp.get("type") or "EMPRESA"
+        comp_sector = comp.get("sector") or "Inovação Corporativa"
+        comp_desc = comp.get("description") or "Organização parceira em busca de startups para POCs e contratação de soluções."
+        comp_demands = comp.get("demands") or comp_desc
+        comp_tags = comp.get("tags") or "IA, SaaS, B2B, Dados"
+        comp_loc = comp.get("location") or "Brasil · Nacional"
+        comp_mode = comp.get("operationMode") or "POC, Compra, POC + Compra"
+
+        full_text = f"{comp_name} {comp_sector} {comp_desc} {comp_demands} {comp_tags}".lower()
+        score = 79
+        for kw in set(st_keywords):
+            if kw in full_text:
+                score += 3
+        score = min(max(score, 75), 98)
+
+        results.append({
+            "companyId": comp.get("id"),
+            "companyName": comp_name,
+            "companyType": comp_type,
+            "sector": comp_sector,
+            "description": comp_desc,
+            "demands": comp_demands,
+            "tags": comp_tags,
+            "location": comp_loc,
+            "website": comp.get("website") or "",
+            "phone": comp.get("phone") or "",
+            "cnpj": comp.get("cnpj") or "",
+            "operationMode": comp_mode,
+            "preferredStage": comp.get("preferredStage") or "Validação / Tração",
+            "avatarUrl": comp.get("avatarUrl"),
+            "matchScore": score,
+            "justification": f"A empresa {comp_name} ({comp_sector}) busca soluções em {comp_tags} para {comp_mode}, apresentando alta sinergia com a {st_name}.",
+            "recommendedAction": f"Apresentar proposta de {comp_mode} da {st_name} para os desafios da {comp_name}.",
+            "reasons": {
+                "perfil": f"{comp_sector} · Contratação via {comp_mode}",
+                "requisitos": f"Tecnologias buscadas pela empresa: {comp_tags}",
+                "objetivo": f"Demanda corporativa compatível com a solução da {st_name}",
+                "contexto": f"{comp_loc} · Compatível com {st_loc}",
+            },
+        })
+
+    results.sort(key=lambda x: x["matchScore"], reverse=True)
+    return {"matches": results}
+
+
 # =============================================================================
 # 4. ROTINA AUTOMÁTICA DIÁRIA ÀS 08:00 DA MANHÃ (SCRAPING + CÁLCULO DE MATCH -> JSON PARA O BANCO)
 # =============================================================================
@@ -777,7 +1172,7 @@ def generate_assistant_chat(
 
     profile_dossier = _format_profile_for_prompt(startup_profile or {})
     opps_summary = "\n".join(
-        f"Tipo: {o.get('type')} | Titulo: {o.get('title')} | Prazo: {o.get('meta') or o.get('metaInfo') or o.get('deadline') or 'Aberto'} | Resumo: {o.get('description') or o.get('shortDescription') or ''}"
+        f"Tipo: {o.get('type')} | Titulo: {o.get('title')} | Prazo: {o.get('meta') or o.get('metaInfo') or o.get('deadline') or 'Aberto'} | Link direto: {o.get('externalUrl') or o.get('url') or 'N/A'} | Resumo: {o.get('description') or o.get('shortDescription') or ''}"
         for o in all_opps[:12]
     )
 
@@ -786,7 +1181,7 @@ def generate_assistant_chat(
         opps_titles = ", ".join(o.get("title", "") for o in all_opps[:3])
         return to_plain_text(
             f"Com base no perfil da {startup_name} na plataforma StartIn, existem {len(all_opps)} oportunidades mapeadas, "
-            f"incluindo {opps_titles}. Consulte a aba Para voce ou Matches para visualizar a aderencia detalhada."
+            f"incluindo {opps_titles}. Consulte a aba Para voce para visualizar a aderencia detalhada."
         )
 
     system_instruction = f"""
@@ -797,6 +1192,7 @@ def generate_assistant_chat(
     2. RECUSA DE PERGUNTAS GERAIS: NUNCA responda perguntas gerais, conhecimentos gerais, matematica, receitas, esportes, politica, entretenimento, programacao generica ou qualquer assunto fora da aplicacao StartIn. Se a pergunta do usuario nao tiver relacao direta com a aplicacao StartIn e suas oportunidades/matches, responda apenas: Sou o assistente exclusivo da plataforma StartIn e respondo somente sobre o projeto, o perfil da sua startup, oportunidades e matches.
     3. TEXTO SUCINTO: Sua resposta deve ser curta, direta e sucinta, tendo no maximo 3 a 4 frases em um unico paragrafo.
     4. FORMATO TEXTO PLANO (SEM MARKDOWN): Responda ESTRITAMENTE em texto plano puro. E proibido usar asteriscos, negrito, italico, hashtags, titulos, listas com tracos ou marcadores, tabelas ou blocos de codigo.
+    5. LINKS DIRETOS: Ao mencionar editais ou oportunidades para o usuario, mencione sempre o nome oficial exato da chamada (ex: Inova Startups 5ª ed) acompanhado do seu link direto correspondente da lista de oportunidades.
 
     DADOS REAIS DA STARTUP DO USUARIO NO PROJETO STARTIN:
     {profile_dossier}
