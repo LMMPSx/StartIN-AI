@@ -19,6 +19,8 @@ from IA import (
     evaluate_company_to_startups_matches,
     evaluate_startup_to_companies_matches,
     generate_assistant_chat,
+    enhance_startup_problem_text,
+    verify_traction_document,
     scrape_real_web_opportunities,
     fetch_user_and_startup_from_backend,
     fetch_opportunities_from_backend,
@@ -91,6 +93,7 @@ class StartupProfileInput(BaseModel):
     description: Optional[str] = None
     location: Optional[str] = None
     cnpj: Optional[str] = None
+    phone: Optional[str] = None
     website: Optional[str] = None
     foundedYear: Optional[str] = None
 
@@ -122,6 +125,9 @@ class StartupProfileInput(BaseModel):
     annualRevenue: Optional[str] = None
     recentGrowth: Optional[str] = None
     investmentRaised: Optional[str] = None
+    trlScore: Optional[int] = None
+    tractionAttested: Optional[bool] = None
+    tractionAttestationInfo: Optional[str] = None
 
     # 05. Objetivos
     mainObjective: Optional[str] = None
@@ -180,6 +186,7 @@ class MatchItem(BaseModel):
     justification: str
     recommendedAction: str
     reasons: Optional[MatchReasons] = None
+    auditBreakdown: Optional[dict] = None
 
 
 class MatchResponse(BaseModel):
@@ -206,23 +213,54 @@ class ChatRequest(BaseModel):
     startup: Optional[StartupProfileInput] = None
     startupId: Optional[int] = None
     userId: Optional[int] = None
+    selectedOpportunity: Optional[dict] = None
+    attachmentName: Optional[str] = None
+    attachmentBase64: Optional[str] = None
+    attachmentText: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
     reply: str
 
 
+class EnhanceProblemRequest(BaseModel):
+    text: str
+    mainArea: Optional[str] = ""
+    startupName: Optional[str] = ""
+
+
+class VerifyTractionRequest(BaseModel):
+    fileName: str
+    fileBase64: str
+    trlScore: Optional[int] = 7
+    trlAnswers: Optional[list] = None
+    startupName: Optional[str] = ""
+    mainArea: Optional[str] = ""
+
+
 # === Endpoints ===
 
+@app.get("/")
 @app.get("/health")
 @app.get("/api/ai/health")
 def health_check():
-    """Verifica a saúde do microserviço, conectividade com a Groq e status do agendador das 08:00."""
+    """Verifica a saúde do microserviço, conectividade com a Groq, balança auditada e status do agendador das 08:00."""
     return {
         "status": "UP",
         "service": "StartIn-IA",
         "groqConnected": client is not None,
         "model": MODEL_NAME,
+        "matchAuditFormula": {
+            "areaOfActuation": "40% (0..40 pts)",
+            "technologies": "30% (0..30 pts)",
+            "otherCriteria": {
+                "total": "30% (0..30 pts)",
+                "stageAndTrl": "10% (0..10 pts)",
+                "modalityAndBusinessModel": "10% (0..10 pts)",
+                "problemDemandSemantics": "5% (0..5 pts)",
+                "locationAndFormat": "5% (0..5 pts)",
+            },
+        },
         "dailySchedule": "08:00",
         "lastDailyRun": _LAST_EXECUTED_DATE,
     }
@@ -294,16 +332,20 @@ def compute_match(request: MatchRequest):
             opp_meta = m.get("opportunity_meta") or m.get("opportunityMeta") or "Inscrições abertas · Brasil"
             opp_tags = m.get("opportunity_tags") or m.get("opportunityTags") or "Inovação • Tecnologia"
             url = m.get("url", "")
-            score = int(m.get("match_score") or m.get("matchScore") or 75)
-            justification = m.get("justification", "Perfil compatível com os critérios da oportunidade.")
+            raw_score = m.get("match_score")
+            if raw_score is None:
+                raw_score = m.get("matchScore")
+            score = int(raw_score) if raw_score is not None else 0
+            justification = m.get("justification", "Perfil avaliado conforme balança auditada da StartIn.")
             rec_action = m.get("recommended_action") or m.get("recommendedAction") or "Submeter candidatura."
+            audit_breakdown = m.get("audit_breakdown") or m.get("auditBreakdown")
 
             raw_reasons = m.get("reasons") or {}
             reasons = MatchReasons(
                 perfil=raw_reasons.get("perfil", "Alinhamento com segmento e mercado"),
-                requisitos=raw_reasons.get("requisitos", "Requisitos técnicos atendidos"),
-                objetivo=raw_reasons.get("objetivo", "Objetivo estratégico convergente"),
-                contexto=raw_reasons.get("contexto", "Modelo operacional compatível"),
+                requisitos=raw_reasons.get("requisitos", "Requisitos técnicos avaliados"),
+                objetivo=raw_reasons.get("objetivo", "Objetivo estratégico avaliado"),
+                contexto=raw_reasons.get("contexto", "Modelo operacional avaliado"),
             )
 
             formatted_matches.append(
@@ -319,6 +361,7 @@ def compute_match(request: MatchRequest):
                     justification=justification,
                     recommendedAction=rec_action,
                     reasons=reasons,
+                    auditBreakdown=audit_breakdown,
                 )
             )
 
@@ -364,12 +407,41 @@ def match_startup_to_companies_endpoint(payload: dict):
     return evaluate_startup_to_companies_matches(startup, companies)
 
 
+@app.post("/api/ai/enhance-problem")
+def enhance_problem_endpoint(request: EnhanceProblemRequest):
+    """
+    Lê o texto de 'Problema que resolve', melhora e estrutura o conteúdo para matchmaking
+    e extrai automaticamente as tags, tecnologias e campos complementares da startup.
+    """
+    return enhance_startup_problem_text(
+        raw_text=request.text,
+        main_area=request.mainArea or "",
+        startup_name=request.startupName or "",
+    )
+
+
+@app.post("/api/ai/verify-traction-pdf")
+def verify_traction_pdf_endpoint(request: VerifyTractionRequest):
+    """
+    Lê o PDF do Atestado de Capacidade Técnica, cruza com o nível TRL da NASA
+    e preenche automaticamente os indicadores de tração da startup.
+    """
+    return verify_traction_document(
+        file_name=request.fileName,
+        file_base64=request.fileBase64,
+        trl_score=request.trlScore or 7,
+        trl_answers=request.trlAnswers,
+        startup_name=request.startupName or "",
+        main_area=request.mainArea or "",
+    )
+
+
 @app.post("/api/ai/chat", response_model=ChatResponse)
 def chat_assistant_endpoint(request: ChatRequest):
     """
-    Endpoint do Assistente Virtual:
-    - Responde SOMENTE sobre o projeto StartIn (oportunidades, matches e perfil da startup).
-    - Formato estritamente texto plano (sem markdown) e sucinto.
+    Endpoint do Assistente Virtual Inteligente:
+    - Elabora templates, propostas técnicas, pitches e textos personalizados para oportunidades.
+    - Suporta oportunidade selecionada (ex: vinda de Salvos) e arquivos anexados (PDF/DOCX/TXT).
     """
     msgs = [{"from": m.from_, "text": m.text} for m in request.messages]
     startup_dict = request.startup.model_dump() if request.startup else {}
@@ -378,7 +450,14 @@ def chat_assistant_endpoint(request: ChatRequest):
     if request.userId and not startup_dict.get("userId"):
         startup_dict["userId"] = request.userId
 
-    reply = generate_assistant_chat(msgs, startup_dict)
+    reply = generate_assistant_chat(
+        messages=msgs,
+        startup_profile=startup_dict,
+        selected_opportunity=request.selectedOpportunity,
+        attachment_name=request.attachmentName,
+        attachment_base64=request.attachmentBase64,
+        attachment_text=request.attachmentText,
+    )
     return ChatResponse(reply=reply)
 
 

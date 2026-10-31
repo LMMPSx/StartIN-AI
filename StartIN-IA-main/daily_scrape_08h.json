@@ -1,0 +1,452 @@
+{
+  "executedAt": "2026-10-29T08:00:09.019202",
+  "scheduledTime": "08:00",
+  "scrapedOpportunities": [
+    {
+      "id": "web-1",
+      "code": "web-1",
+      "title": "Edital Inova Startups 6ª Edição 2026 (Regulamento Oficial)",
+      "type": "EDITAL",
+      "description": "Programa de aceleração, capacitação e investimento financeiro para startups de base tecnológica com soluções B2B e IA.",
+      "shortDescription": "Programa de aceleração, capacitação e investimento financeiro para startups de base tecnológica com soluções B2B e IA.",
+      "tags": "InovaStartups • Aceleração • Investimento • B2B",
+      "url": "https://inovastartups.com.br/edital-inova-6a-edicao.pdf",
+      "externalUrl": "https://inovastartups.com.br/edital-inova-6a-edicao.pdf",
+      "deadline": "Inscrições abertas · Brasil · Remoto",
+      "meta": "Inscrições abertas · Brasil · Remoto",
+      "metaInfo": "Inscrições abertas · Brasil · Remoto"
+    },
+    {
+      "id": "web-2",
+      "code": "web-2",
+      "title": "Edital Inova Startups 5ª Edição (PDF)",
+      "type": "EDITAL",
+      "description": "Apoio a startups inovadoras com conexões corporativas e validação de MVPs em escala nacional.",
+      "shortDescription": "Apoio a startups inovadoras com conexões corporativas e validação de MVPs em escala nacional.",
+      "tags": "Inovação • Subvenção • Seed • Validação",
+      "url": "https://inovastartups.com.br/wp-content/uploads/2025/12/Edital-Programa-Inova-5a-Edicao_2.1v.pdf",
+      "externalUrl": "https://inovastartups.com.br/wp-content/uploads/2025/12/Edital-Programa-Inova-5a-Edicao_2.1v.pdf",
+      "deadline": "Fluxo contínuo · Brasil",
+      "meta": "Fluxo contínuo · Brasil",
+      "metaInfo": "Fluxo contínuo · Brasil"
+    },
+    {
+      "id": "web-3",
+      "code": "web-3",
+      "title": "Chamada PIPE Jornada Tecnológica 2026 - Fase 1 (FAPESP)",
+      "type": "EDITAL",
+      "description": "Financiamento não reembolsável da FAPESP para validação de viabilidade técnico-científica de startups inovadoras.",
+      "shortDescription": "Financiamento não reembolsável da FAPESP para validação de viabilidade técnico-científica de startups inovadoras.",
+      "tags": "FAPESP • PIPE • Fase 1 • Subvenção",
+      "url": "https://fapesp.br/pipe/jornada-tecnologica-2026-fase-1",
+      "externalUrl": "https://fapesp.br/pipe/jornada-tecnologica-2026-fase-1",
+      "deadline": "Inscrições abertas · São Paulo · Brasil",
+      "meta": "Inscrições abertas · São Paulo · Brasil",
+      "metaInfo": "Inscrições abertas · São Paulo · Brasil"
+    },
+    {
+      "id": "web-4",
+      "code": "web-4",
+      "title": "Chamada PIPE Indústria do Futuro 2026 (FAPESP)",
+      "type": "EDITAL",
+      "description": "Apoio a pesquisas aplicadas para empresas com soluções de inteligência artificial, dados e robótica avançada.",
+      "shortDescription": "Apoio a pesquisas aplicadas para empresas com soluções de inteligência artificial, dados e robótica avançada.",
+      "tags": "FAPESP • Indústria 4.0 • IA • Pesquisa",
+      "url": "https://fapesp.br/pipe/jornada-futuro-2026",
+      "externalUrl": "https://fapesp.br/pipe/jornada-futuro-2026",
+      "deadline": "Prazo aberto · Brasil",
+      "meta": "Prazo aberto · Brasil",
+      "metaInfo": "Prazo aberto · Brasil"
+    },
+    {
+      "id": "web-5",
+      "code": "web-5",
+      "title": "Chamada Pública FINEP EFPC Inovação Aberta",
+      "type": "EDITAL",
+      "description": "Recursos de subvenção econômica FINEP para conexão entre entidades fechadas de previdência e startups de tecnologia.",
+      "shortDescription": "Recursos de subvenção econômica FINEP para conexão entre entidades fechadas de previdência e startups de tecnologia.",
+      "tags": "FINEP • Subvenção • Inovação Aberta • B2B",
+      "url": "https://legacy.finep.gov.br/a-finep-externo/edital-efpc",
+      "externalUrl": "https://legacy.finep.gov.br/a-finep-externo/edital-efpc",
+      "deadline": "Inscrições abertas · Brasil",
+      "meta": "Inscrições abertas · Brasil",
+      "metaInfo": "Inscrições abertas · Brasil"
+    }
+  ],
+  "startupMatches": [
+    {
+      "startupId": 1,
+      "startupName": "Kleber",
+      "totalAnalyzed": 11,
+      "matches": [
+        {
+          "opportunityId": "1",
+          "opportunityTitle": "Edital Inovação Aberta 2026",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Programa de inovação aberta para startups com soluções em dados, tecnologia aplicada e automação por IA. A oportunidade busca aplicações com potencial de validação em ambiente real e escalabilidade nacional.",
+          "opportunityMeta": "Prazo 15/10/2026 · Brasil · Remoto",
+          "opportunityTags": "IA • Dados • Automação • SaaS B2B",
+          "url": "https://inovastartups.com.br/",
+          "matchScore": 98,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Edital Inovação Aberta 2026' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Prazo 15/10/2026 · Brasil · Remoto"
+          }
+        },
+        {
+          "opportunityId": "2",
+          "opportunityTitle": "POC — Inteligência Operacional",
+          "opportunityType": "POC",
+          "opportunityDescription": "Empresa Alpha busca startup para automatizar processos internos e testar inteligência operacional em um ambiente real com possibilidade de contrato corporativo.",
+          "opportunityMeta": "Resposta até sexta · Brasil · Híbrido",
+          "opportunityTags": "IA • Operações • Automação • B2B",
+          "url": "https://empresa-alpha.com/poc",
+          "matchScore": 98,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'POC — Inteligência Operacional' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Resposta até sexta · Brasil · Híbrido"
+          }
+        },
+        {
+          "opportunityId": "10",
+          "opportunityTitle": "Chamada PIPE Indústria do Futuro 2026 (FAPESP)",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Apoio a pesquisas aplicadas para empresas com soluções de inteligência artificial, dados e robótica avançada.",
+          "opportunityMeta": "Prazo aberto · Brasil",
+          "opportunityTags": "FAPESP • Indústria 4.0 • IA • Pesquisa",
+          "url": "https://fapesp.br/pipe/jornada-futuro-2026",
+          "matchScore": 98,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Chamada PIPE Indústria do Futuro 2026 (FAPESP)' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Prazo aberto · Brasil"
+          }
+        },
+        {
+          "opportunityId": "11",
+          "opportunityTitle": "Poc, quem tem o melhor pão de queijo",
+          "opportunityType": "POC",
+          "opportunityDescription": "Faça um pão de queijo top, pode conter Césio 137",
+          "opportunityMeta": "Aberta · Brasil · Presencial",
+          "opportunityTags": "IA • SaaS • B2B • Dados • Healthtech",
+          "url": "",
+          "matchScore": 98,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Poc, quem tem o melhor pão de queijo' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Aberta · Brasil · Presencial"
+          }
+        },
+        {
+          "opportunityId": "6",
+          "opportunityTitle": "Chamada Pública FINEP EFPC Inovação Aberta",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Recursos de subvenção econômica FINEP para conexão entre entidades fechadas de previdência e startups de tecnologia.",
+          "opportunityMeta": "Inscrições abertas · Brasil",
+          "opportunityTags": "FINEP • Subvenção • Inovação Aberta • B2B",
+          "url": "https://legacy.finep.gov.br/a-finep-externo/edital-efpc",
+          "matchScore": 97,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Chamada Pública FINEP EFPC Inovação Aberta' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Inscrições abertas · Brasil"
+          }
+        },
+        {
+          "opportunityId": "4",
+          "opportunityTitle": "Startup Connect Recife",
+          "opportunityType": "EVENTO",
+          "opportunityDescription": "Evento para conectar startups, corporações e investidores em uma agenda de networking, rodadas de negócios e apresentação de pitches.",
+          "opportunityMeta": "22/10/2026 · Recife · Presencial",
+          "opportunityTags": "Networking • Investimento • B2B • Ecossistema",
+          "url": "https://startupconnect.com.br",
+          "matchScore": 93,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Startup Connect Recife' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · 22/10/2026 · Recife · Presencial"
+          }
+        },
+        {
+          "opportunityId": "7",
+          "opportunityTitle": "Edital Inova Startups 6ª Edição 2026 (Regulamento Oficial)",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Programa de aceleração, capacitação e investimento financeiro para startups de base tecnológica com soluções B2B e IA.",
+          "opportunityMeta": "Inscrições abertas · Brasil · Remoto",
+          "opportunityTags": "InovaStartups • Aceleração • Investimento • B2B",
+          "url": "https://inovastartups.com.br/edital-inova-6a-edicao.pdf",
+          "matchScore": 93,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Edital Inova Startups 6ª Edição 2026 (Regulamento Oficial)' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Inscrições abertas · Brasil · Remoto"
+          }
+        },
+        {
+          "opportunityId": "9",
+          "opportunityTitle": "Chamada PIPE Jornada Tecnológica 2026 - Fase 1 (FAPESP)",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Financiamento não reembolsável da FAPESP para validação de viabilidade técnico-científica de startups inovadoras.",
+          "opportunityMeta": "Inscrições abertas · São Paulo · Brasil",
+          "opportunityTags": "FAPESP • PIPE • Fase 1 • Subvenção",
+          "url": "https://fapesp.br/pipe/jornada-tecnologica-2026-fase-1",
+          "matchScore": 93,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Chamada PIPE Jornada Tecnológica 2026 - Fase 1 (FAPESP)' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Inscrições abertas · São Paulo · Brasil"
+          }
+        },
+        {
+          "opportunityId": "3",
+          "opportunityTitle": "Primeira Compra — Automação & Dados B2B",
+          "opportunityType": "PRIMEIRA_COMPRA",
+          "opportunityDescription": "Empresa Alpha abre programa de Primeira Compra Corporativa para contratar lote pioneiro de startup em validação com solução aplicável a dados, IA e eficiência operacional.",
+          "opportunityMeta": "Inscrições abertas · Brasil · Remoto",
+          "opportunityTags": "Primeira Compra • IA • Dados • SaaS B2B",
+          "url": "https://empresa-alpha.com/primeira-compra",
+          "matchScore": 92,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Primeira Compra — Automação & Dados B2B' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Inscrições abertas · Brasil · Remoto"
+          }
+        },
+        {
+          "opportunityId": "8",
+          "opportunityTitle": "Edital Inova Startups 5ª Edição (PDF)",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Apoio a startups inovadoras com conexões corporativas e validação de MVPs em escala nacional.",
+          "opportunityMeta": "Fluxo contínuo · Brasil",
+          "opportunityTags": "Inovação • Subvenção • Seed • Validação",
+          "url": "https://inovastartups.com.br/wp-content/uploads/2025/12/Edital-Programa-Inova-5a-Edicao_2.1v.pdf",
+          "matchScore": 89,
+          "justification": "A startup Kleber (Inteligência Artificial & Dados · B2B, em estágio de Validação) possui forte aderência com 'Edital Inova Startups 5ª Edição (PDF)' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da Kleber (tecnologia proprietária) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da Kleber: Inteligência Artificial & Dados · IA · Dados & Analytics · SaaS B2B",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, PE · Atuação Recife, PE · Fluxo contínuo · Brasil"
+          }
+        }
+      ]
+    },
+    {
+      "startupId": 2,
+      "startupName": "StartOut",
+      "totalAnalyzed": 11,
+      "matches": [
+        {
+          "opportunityId": "1",
+          "opportunityTitle": "Edital Inovação Aberta 2026",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Programa de inovação aberta para startups com soluções em dados, tecnologia aplicada e automação por IA. A oportunidade busca aplicações com potencial de validação em ambiente real e escalabilidade nacional.",
+          "opportunityMeta": "Prazo 15/10/2026 · Brasil · Remoto",
+          "opportunityTags": "IA • Dados • Automação • SaaS B2B",
+          "url": "https://inovastartups.com.br/",
+          "matchScore": 98,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Edital Inovação Aberta 2026' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Prazo 15/10/2026 · Brasil · Remoto"
+          }
+        },
+        {
+          "opportunityId": "2",
+          "opportunityTitle": "POC — Inteligência Operacional",
+          "opportunityType": "POC",
+          "opportunityDescription": "Empresa Alpha busca startup para automatizar processos internos e testar inteligência operacional em um ambiente real com possibilidade de contrato corporativo.",
+          "opportunityMeta": "Resposta até sexta · Brasil · Híbrido",
+          "opportunityTags": "IA • Operações • Automação • B2B",
+          "url": "https://empresa-alpha.com/poc",
+          "matchScore": 98,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'POC — Inteligência Operacional' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Resposta até sexta · Brasil · Híbrido"
+          }
+        },
+        {
+          "opportunityId": "10",
+          "opportunityTitle": "Chamada PIPE Indústria do Futuro 2026 (FAPESP)",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Apoio a pesquisas aplicadas para empresas com soluções de inteligência artificial, dados e robótica avançada.",
+          "opportunityMeta": "Prazo aberto · Brasil",
+          "opportunityTags": "FAPESP • Indústria 4.0 • IA • Pesquisa",
+          "url": "https://fapesp.br/pipe/jornada-futuro-2026",
+          "matchScore": 98,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Chamada PIPE Indústria do Futuro 2026 (FAPESP)' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Prazo aberto · Brasil"
+          }
+        },
+        {
+          "opportunityId": "11",
+          "opportunityTitle": "Poc, quem tem o melhor pão de queijo",
+          "opportunityType": "POC",
+          "opportunityDescription": "Faça um pão de queijo top, pode conter Césio 137",
+          "opportunityMeta": "Aberta · Brasil · Presencial",
+          "opportunityTags": "IA • SaaS • B2B • Dados • Healthtech",
+          "url": "",
+          "matchScore": 98,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Poc, quem tem o melhor pão de queijo' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Aberta · Brasil · Presencial"
+          }
+        },
+        {
+          "opportunityId": "4",
+          "opportunityTitle": "Startup Connect Recife",
+          "opportunityType": "EVENTO",
+          "opportunityDescription": "Evento para conectar startups, corporações e investidores em uma agenda de networking, rodadas de negócios e apresentação de pitches.",
+          "opportunityMeta": "22/10/2026 · Recife · Presencial",
+          "opportunityTags": "Networking • Investimento • B2B • Ecossistema",
+          "url": "https://startupconnect.com.br",
+          "matchScore": 93,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Startup Connect Recife' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · 22/10/2026 · Recife · Presencial"
+          }
+        },
+        {
+          "opportunityId": "6",
+          "opportunityTitle": "Chamada Pública FINEP EFPC Inovação Aberta",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Recursos de subvenção econômica FINEP para conexão entre entidades fechadas de previdência e startups de tecnologia.",
+          "opportunityMeta": "Inscrições abertas · Brasil",
+          "opportunityTags": "FINEP • Subvenção • Inovação Aberta • B2B",
+          "url": "https://legacy.finep.gov.br/a-finep-externo/edital-efpc",
+          "matchScore": 93,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Chamada Pública FINEP EFPC Inovação Aberta' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Inscrições abertas · Brasil"
+          }
+        },
+        {
+          "opportunityId": "7",
+          "opportunityTitle": "Edital Inova Startups 6ª Edição 2026 (Regulamento Oficial)",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Programa de aceleração, capacitação e investimento financeiro para startups de base tecnológica com soluções B2B e IA.",
+          "opportunityMeta": "Inscrições abertas · Brasil · Remoto",
+          "opportunityTags": "InovaStartups • Aceleração • Investimento • B2B",
+          "url": "https://inovastartups.com.br/edital-inova-6a-edicao.pdf",
+          "matchScore": 93,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Edital Inova Startups 6ª Edição 2026 (Regulamento Oficial)' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Inscrições abertas · Brasil · Remoto"
+          }
+        },
+        {
+          "opportunityId": "9",
+          "opportunityTitle": "Chamada PIPE Jornada Tecnológica 2026 - Fase 1 (FAPESP)",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Financiamento não reembolsável da FAPESP para validação de viabilidade técnico-científica de startups inovadoras.",
+          "opportunityMeta": "Inscrições abertas · São Paulo · Brasil",
+          "opportunityTags": "FAPESP • PIPE • Fase 1 • Subvenção",
+          "url": "https://fapesp.br/pipe/jornada-tecnologica-2026-fase-1",
+          "matchScore": 93,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Chamada PIPE Jornada Tecnológica 2026 - Fase 1 (FAPESP)' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Inscrições abertas · São Paulo · Brasil"
+          }
+        },
+        {
+          "opportunityId": "3",
+          "opportunityTitle": "Primeira Compra — Automação & Dados B2B",
+          "opportunityType": "PRIMEIRA_COMPRA",
+          "opportunityDescription": "Empresa Alpha abre programa de Primeira Compra Corporativa para contratar lote pioneiro de startup em validação com solução aplicável a dados, IA e eficiência operacional.",
+          "opportunityMeta": "Inscrições abertas · Brasil · Remoto",
+          "opportunityTags": "Primeira Compra • IA • Dados • SaaS B2B",
+          "url": "https://empresa-alpha.com/primeira-compra",
+          "matchScore": 92,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Primeira Compra — Automação & Dados B2B' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Inscrições abertas · Brasil · Remoto"
+          }
+        },
+        {
+          "opportunityId": "8",
+          "opportunityTitle": "Edital Inova Startups 5ª Edição (PDF)",
+          "opportunityType": "EDITAL",
+          "opportunityDescription": "Apoio a startups inovadoras com conexões corporativas e validação de MVPs em escala nacional.",
+          "opportunityMeta": "Fluxo contínuo · Brasil",
+          "opportunityTags": "Inovação • Subvenção • Seed • Validação",
+          "url": "https://inovastartups.com.br/wp-content/uploads/2025/12/Edital-Programa-Inova-5a-Edicao_2.1v.pdf",
+          "matchScore": 85,
+          "justification": "A startup StartOut (Inteligência Artificial & Dados · SaaS B2B, em estágio de Validação) possui forte aderência com 'Edital Inova Startups 5ª Edição (PDF)' pelas competências em Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech e foco em crescimento e validação.",
+          "recommendedAction": "Destacar a solução da StartOut (Plataforma tecnológica focada em Inteligência Artificial & Dados utilizando Inteligência A...) e os resultados no setor de Inteligência Artificial & Dados.",
+          "reasons": {
+            "perfil": "Inteligência Artificial & Dados · SaaS B2B · Setor Inteligência Artificial & Dados (Validação)",
+            "requisitos": "Tecnologias da StartOut: Inteligência Artificial & Dados · IA · Dados & Analytics · Fintech",
+            "objetivo": "Crescimento e validação",
+            "contexto": "Recife, Pe · Atuação Recife, Pe · Fluxo contínuo · Brasil"
+          }
+        }
+      ]
+    }
+  ]
+}
