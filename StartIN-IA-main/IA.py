@@ -43,8 +43,8 @@ except Exception as e:
     print(f"Aviso ao inicializar cliente Groq: {e}")
     client = None
 
-MODEL_NAME = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-FALLBACK_MODELS = [MODEL_NAME, "llama-3.1-8b-instant", "openai/gpt-oss-20b"]
+MODEL_NAME = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+FALLBACK_MODELS = [MODEL_NAME, "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
 
 # Portais reais de Editais, Chamadas Públicas e Eventos de Inovação no Brasil
 DEFAULT_PORTAL_URLS = [
@@ -1184,6 +1184,102 @@ def compute_audited_match_breakdown(
         location_context_score = 3
         loc_rule = "Abrangência geográfica compatível"
 
+    # -------------------------------------------------------------------------
+    # CÁLCULO DETALHADO DOS 10 SUBTÓPICOS TÉCNICOS (40% / 30% / 30%)
+    # -------------------------------------------------------------------------
+    # Tópico 1 — Área de Atuação e Mercado (0 a 40 pts)
+    # Subtópico 1.1: Domínio Macro-Setorial (0 a 25 pts)
+    if primary_domain_overlap or direct_label_match:
+        macro_domain_score = 25
+    elif context_domain_overlap:
+        macro_domain_score = 18
+    elif is_multi_sector_call:
+        macro_domain_score = 15
+    elif sub_domain_hits > 0:
+        macro_domain_score = min(10, sub_domain_hits * 3)
+    else:
+        macro_domain_score = 0
+
+    # Subtópico 1.2: Vocabulário Técnico & Nicho Especializado (0 a 10 pts)
+    if primary_domain_overlap or direct_label_match:
+        niche_vocab_score = min(10, max(2, sub_domain_hits * 2 + (4 if direct_label_match else 2)))
+    elif context_domain_overlap:
+        niche_vocab_score = min(9, max(2, sub_domain_hits * 2 + 1))
+    elif is_multi_sector_call:
+        niche_vocab_score = min(8, max(1, sub_domain_hits * 2))
+    elif sub_domain_hits > 0:
+        niche_vocab_score = min(5, sub_domain_hits * 2)
+    else:
+        niche_vocab_score = 0
+
+    # Subtópico 1.3: Segmento de Mercado & Aplicação Direta (0 a 5 pts)
+    if direct_label_match:
+        market_segment_score = 5
+    elif primary_domain_overlap:
+        market_segment_score = 4
+    elif context_domain_overlap:
+        market_segment_score = 3
+    elif is_multi_sector_call:
+        market_segment_score = 3
+    elif sub_domain_hits > 0:
+        market_segment_score = 1
+    else:
+        market_segment_score = 0
+
+    area_score = min(40, macro_domain_score + niche_vocab_score + market_segment_score)
+
+    # Tópico 2 — Tecnologias e Stack (0 a 30 pts)
+    # Subtópico 2.1: Cobertura da Stack Essencial (0 a 18 pts)
+    stack_coverage_score = coverage_pts
+
+    # Subtópico 2.2: Densidade Tecnológica (0 a 8 pts)
+    if n_matched == 0:
+        tech_density_score = 0
+    elif n_matched == 1:
+        tech_density_score = 4
+    elif n_matched == 2:
+        tech_density_score = 6
+    else:
+        tech_density_score = 8
+
+    # Subtópico 2.3: Arquitetura & Integrações (0 a 4 pts)
+    if n_matched >= 3:
+        architecture_score = 4
+    elif n_matched == 2:
+        architecture_score = 2
+    elif n_matched == 1:
+        architecture_score = 1
+    else:
+        architecture_score = 0
+
+    tech_score = min(30, stack_coverage_score + tech_density_score + architecture_score)
+
+    # Tópico 3 — Maturidade, Modalidade e Contexto (0 a 30 pts)
+    # Subtópico 3.1: Estágio de Maturidade & Escala TRL NASA (0 a 10 pts) -> stage_trl_score
+    # Subtópico 3.2: Modalidade da Oportunidade & Modelo de Negócio (0 a 10 pts)
+    if "evento" in tg_type_norm:
+        modality_model_score = max(modality_model_score, 8)
+    modality_model_score = max(0, min(10, modality_model_score))
+
+    # Subtópico 3.3: Semântica Problema x Demanda Operacional (0 a 5 pts) -> problem_semantic_score
+    # Subtópico 3.4: Localização, Região de Atuação & Formato (0 a 5 pts)
+    if "evento" in tg_type_norm and location_context_score >= 3:
+        location_context_score = min(5, location_context_score + 1)
+    location_context_score = max(0, min(5, location_context_score))
+
+    subtopics = {
+        "macroDomainScore": macro_domain_score,
+        "nicheVocabularyScore": niche_vocab_score,
+        "marketSegmentScore": market_segment_score,
+        "stackCoverageScore": stack_coverage_score,
+        "techDensityScore": tech_density_score,
+        "architectureScore": architecture_score,
+        "stageTrlScore": stage_trl_score,
+        "modalityModelScore": modality_model_score,
+        "problemSemanticScore": problem_semantic_score,
+        "locationFormatScore": location_context_score,
+    }
+
     other_score = stage_trl_score + modality_model_score + problem_semantic_score + location_context_score
     total_score = max(0, min(100, area_score + tech_score + other_score))
 
@@ -1223,6 +1319,7 @@ def compute_audited_match_breakdown(
         "problemSemanticScore": problem_semantic_score,
         "locationContextScore": location_context_score,
         "locationRule": loc_rule,
+        "subtopics": subtopics,
         "reasons": reasons,
     }
 
@@ -1249,6 +1346,8 @@ def _recompute_audit_with_llm_semantic(audit: dict, llm_semantic_raw: Any, llm_r
         + updated["problemSemanticScore"]
         + updated["locationContextScore"]
     )
+    if "subtopics" in updated and isinstance(updated["subtopics"], dict):
+        updated["subtopics"]["problemSemanticScore"] = updated["problemSemanticScore"]
     updated["totalScore"] = max(
         0,
         min(100, updated["areaScore"] + updated["techScore"] + updated["otherScore"]),
@@ -2054,6 +2153,20 @@ def run_daily_scrape_and_match_job(send_to_backend: bool = True) -> Dict[str, An
 # 5. ESTRUTURAÇÃO DE TEXTO COM IA (ONBOARDING ETAPA 02) E ATESTADO TRL/PDF (ETAPA 03)
 # =============================================================================
 
+def replace_pilot_with_poc(val: Any) -> Any:
+    """Garante que qualquer menção a piloto/piloto rápido seja substituída por prova de conceito (POC)."""
+    if isinstance(val, str):
+        v = re.sub(r"(?i)\bprojetos?-?pilotos?\b", "provas de conceito (POC)", val)
+        v = re.sub(r"(?i)\bpilotos?\s+r[aá]pidos?\b", "provas de conceito (POC)", v)
+        v = re.sub(r"(?i)\bpilotos?\b", "provas de conceito", v)
+        return v
+    elif isinstance(val, list):
+        return [replace_pilot_with_poc(x) for x in val]
+    elif isinstance(val, dict):
+        return {k: replace_pilot_with_poc(v) for k, v in val.items()}
+    return val
+
+
 def enhance_startup_problem_text(
     raw_text: str,
     main_area: str = "",
@@ -2061,7 +2174,8 @@ def enhance_startup_problem_text(
 ) -> Dict[str, Any]:
     """
     Lê o rascunho escrito pelo usuário na caixa 'Problema que resolve', melhora e
-    estrutura o texto no layout ideal para o matchmaking e extrai automaticamente
+    estrutura o texto de forma totalmente integrada ao que foi passado previamente
+    (sem templates engessados ou frases genéricas pré-prontas) e extrai automaticamente
     as tags, tecnologias, modelo de negócio, funcionamento, diferencial e impacto.
     """
     clean_input = (raw_text or "").strip()
@@ -2070,60 +2184,76 @@ def enhance_startup_problem_text(
 
     if client and clean_input:
         prompt = f"""
-        Você é o arquiteto de matchmaking da plataforma StartIn.
-        O usuário da startup '{name_label}' (Área principal: {area_label}) escreveu o seguinte texto sobre o problema que resolve:
+        Você é o arquiteto especialista em matchmaking e inovação aberta da plataforma StartIn.
+        O fundador da startup '{name_label}' (Área principal: {area_label}) escreveu o seguinte texto base sobre a dor que resolve e sua solução:
         \"\"\"{clean_input}\"\"\"
 
-        Reescreva, aprimore e estruture esse texto em um layout profissional e completo contendo TODAS as informações necessárias para um matchmaking de alta precisão (Problema Central, Solução e Tecnologia Aplicada, Modelo de Negócio e Público-Alvo, Diferencial e Impacto Esperado).
-        IMPORTANTE: O campo "enhancedText" e todos os demais campos devem estar ESTRITAMENTE em texto plano puro, SEM NENHUM Markdown (proibido usar *, **, #, ---, >, listas com -, crases ` ou tabelas |).
-        Além disso, extraia desse texto estruturado entre 4 e 7 tags curtas e objetivas (tecnologias, mercado, modelo) para alimentar o motor de match.
+        DIRETRIZES DE INTEGRAÇÃO TOTAL E SÍNTESE EXECUTIVA (SEM TEMPLATES ENGESSADOS):
+        1. INTEGRAÇÃO REAL DO TEXTO BASE:
+           - Leia com máxima atenção o texto passado. Compreenda cada termo, tecnologia, cliente, modelo e problema mencionado.
+           - NÃO jogue um template pré-pronto por cima! NÃO repita apenas a frase do usuário com textos genéricos colados.
+           - REESCREVA E ARTICULE o conteúdo em uma narrativa executiva fluida, coesa e profissional, onde CADA parágrafo seja desenvolvido a partir das informações fornecidas pelo usuário.
+        2. ESTRUTURAÇÃO FLUIDA E PROFISSIONAL:
+           Organize o texto em parágrafos temáticos bem desenvolvidos (separados por linha em branco), por exemplo:
+           - Problema e Dor de Mercado: contextualize a dor real e a ineficiência que a solução combate, com base no que o usuário escreveu.
+           - Solução e Arquitetura Tecnológica: aprofunde como a solução da startup opera na prática e quais tecnologias são aplicadas.
+           - Modelo de Negócio e Público Atendido: especifique o perfil de clientes e a modalidade de entrega.
+           - Diferencial Competitivo e Impacto Mensurável: consolide os ganhos operacionais, financeiros ou de escala proporcionados.
+        3. FORMATO OBRIGATÓRIO:
+           - O campo "enhancedText" e todos os outros devem estar ESTRITAMENTE em texto plano puro, SEM NENHUM Markdown (proibido usar *, **, #, ---, >, listas com -, crases ` ou tabelas |).
+        4. TAGS E TÓPICOS INTEGRADOS:
+           - Extraia entre 4 e 7 tags/tópicos concisos e representativos que estejam presentes e integrados ao texto, para alimentar o motor de matchmaking da plataforma.
+        5. TERMINOLOGIA OBRIGATÓRIA:
+           - Em relação à modalidade POC, utilize SEMPRE o termo 'prova de conceito' ou 'POC'. NUNCA utilize termos como 'piloto' ou 'piloto rápido' para designar POC.
 
-        Retorne ESTRITAMENTE um JSON válido com esta estrutura exata:
+        Retorne ESTRITAMENTE um JSON válido com esta estrutura:
         {{
-          "enhancedText": "Problema Central: ...\\n\\nSolução e Tecnologia Aplicada: ...\\n\\nModelo de Negócio e Público-Alvo: ...\\n\\nDiferencial e Impacto Esperado: ...",
-          "tags": ["IA", "SaaS B2B", "Dados", "Automação"],
-          "businessModel": "SaaS B2B",
-          "howItWorks": "Resumo objetivo de como a solução funciona e tecnologias...",
-          "differentiator": "Resumo do diferencial competitivo...",
-          "impact": "Resumo do impacto gerado...",
-          "targetAudience": "Perfil de clientes atendidos..."
+          "enhancedText": "Problema Central:\\n[Parágrafo articulando a dor real com base no texto]\\n\\nSolução e Tecnologia Aplicada:\\n[Parágrafo detalhando a tecnologia e funcionamento com base no texto]\\n\\nModelo de Negócio e Público-Alvo:\\n[Parágrafo detalhando clientes e modelo]\\n\\nDiferencial e Impacto:\\n[Parágrafo consolidando benefícios e métricas]",
+          "tags": ["Tag1", "Tag2", "Tag3", "Tag4"],
+          "technologies": "Tag1, Tag2, Tag3, Tag4",
+          "businessModel": "SaaS B2B ou modelo extraído",
+          "howItWorks": "Resumo objetivo articulado da solução...",
+          "differentiator": "Diferencial competitivo...",
+          "impact": "Impacto gerado...",
+          "targetAudience": "Público atendido..."
         }}
         """
-        try:
-            completion = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Você é um especialista em posicionamento de startups, editais de fomento e inovação aberta corporativa. Responda apenas em JSON válido.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.3,
-            )
-            parsed = json.loads(completion.choices[0].message.content or "{}")
-            if parsed.get("enhancedText"):
-                tags = parsed.get("tags") or []
-                if isinstance(tags, str):
-                    tags = [t.strip() for t in tags.split(",") if t.strip()]
-                tags = [str(t).strip().lstrip("#") for t in tags if str(t).strip()][:7]
-                if not tags:
-                    tags = [area_label, "Inovação", "B2B", "Tecnologia"]
-                return {
-                    "enhancedText": to_structured_plain_text(parsed["enhancedText"]),
-                    "tags": tags,
-                    "technologies": ", ".join(tags),
-                    "businessModel": parsed.get("businessModel") or "SaaS B2B",
-                    "howItWorks": parsed.get("howItWorks") or "",
-                    "differentiator": parsed.get("differentiator") or "",
-                    "impact": parsed.get("impact") or "",
-                    "targetAudience": parsed.get("targetAudience") or "Empresas e organizações B2B",
-                }
-        except Exception as e:
-            print(f"[StartIn IA] Aviso ao melhorar texto via Groq: {e}. Aplicando estruturação inteligente local.")
+        for candidate_model in FALLBACK_MODELS:
+            try:
+                completion = client.chat.completions.create(
+                    model=candidate_model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Você é um especialista em posicionamento de startups e inovação aberta. Responda apenas em JSON válido.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.3,
+                )
+                parsed = json.loads(completion.choices[0].message.content or "{}")
+                if parsed.get("enhancedText"):
+                    tags = parsed.get("tags") or []
+                    if isinstance(tags, str):
+                        tags = [t.strip() for t in tags.split(",") if t.strip()]
+                    tags = [str(t).strip().lstrip("#") for t in tags if str(t).strip()][:7]
+                    if not tags:
+                        tags = [area_label, "Inovação", "B2B", "Tecnologia"]
+                    return replace_pilot_with_poc({
+                        "enhancedText": to_structured_plain_text(parsed["enhancedText"]),
+                        "tags": tags,
+                        "technologies": ", ".join(tags),
+                        "businessModel": parsed.get("businessModel") or "SaaS B2B",
+                        "howItWorks": parsed.get("howItWorks") or "",
+                        "differentiator": parsed.get("differentiator") or "",
+                        "impact": parsed.get("impact") or "",
+                        "targetAudience": parsed.get("targetAudience") or "Empresas e organizações B2B",
+                    })
+            except Exception as e:
+                print(f"[StartIn IA] Aviso no modelo '{candidate_model}': {e}")
 
-    # Fallback determinístico inteligente
+    # Fallback determinístico semanticamente integrado ao texto
     lower_in = f"{clean_input} {area_label}".lower()
     inferred_tags: List[str] = []
     keyword_map = [
@@ -2137,6 +2267,7 @@ def enhance_startup_problem_text(
         (["iot", "sensor", "indústria", "manufatura", "hardware"], "IoT & Indústria 4.0"),
         (["segurança", "cyber", "lgpd", "fraude"], "Cibersegurança"),
         (["nuvem", "cloud", "api", "integra"], "Cloud & APIs"),
+        (["b2c", "consumidor final", "varejo b2c"], "B2C"),
         (["b2b", "corporativ", "empresa"], "B2B"),
         (["saas", "plataforma", "assinatura", "software"], "SaaS"),
     ]
@@ -2146,43 +2277,170 @@ def enhance_startup_problem_text(
 
     if area_label and area_label not in inferred_tags:
         inferred_tags.insert(0, area_label)
-    for default_t in ["SaaS B2B", "Inovação", " Automação"]:
-        clean_t = default_t.strip()
-        if len(inferred_tags) < 5 and clean_t not in inferred_tags:
-            inferred_tags.append(clean_t)
+    for default_t in ["Inovação", "Eficiência"]:
+        if len(inferred_tags) < 5 and default_t not in inferred_tags:
+            inferred_tags.append(default_t)
     inferred_tags = inferred_tags[:6]
 
-    b_model = "Marketplace / Plataforma" if "marketplace" in lower_in else ("Hardware & IoT B2B" if "iot" in lower_in or "hardware" in lower_in else "SaaS B2B")
-    core_problem = clean_input if clean_input else f"Processos manuais, baixa eficiência operacional e fragmentação de dados no setor de {area_label}."
+    is_b2c = "b2c" in lower_in
+    b_model = "Plataforma B2C" if is_b2c else ("Hardware & IoT B2B" if "iot" in lower_in or "hardware" in lower_in else "SaaS B2B")
+    target_audience = "Consumidores finais e usuários do segmento B2C" if is_b2c else f"Empresas, corporações e organizações do setor de {area_label}"
 
-    how_it_works = (
-        f"Plataforma tecnológica focada em {area_label} utilizando {', '.join(inferred_tags[:3])} "
-        f"para centralizar operações, automatizar rotinas críticas e apoiar tomadas de decisão com inteligência."
-    )
-    differentiator = (
-        f"Arquitetura escalável de implantação rápida, alta aderência a demandas corporativas e editais de inovação, "
-        f"com foco direto na dor operacional descrita."
-    )
-    impact = "Redução de custos operacionais, ganho de produtividade mensurável e governança em tempo real."
-    target_audience = f"Médias e grandes empresas, instituições e parceiros do ecossistema de {area_label}."
+    p_clean = clean_input.rstrip('.') if clean_input else f"Processos manuais e ineficiência operacional no setor de {area_label}"
 
-    structured = (
-        f"Problema Central:\n{core_problem}\n\n"
-        f"Solução e Tecnologia Aplicada:\n{how_it_works}\n\n"
-        f"Modelo de Negócio e Público-Alvo:\nAtuação no modelo {b_model}, direcionada a {target_audience.lower()}\n\n"
-        f"Diferencial e Impacto Esperado:\n{differentiator} {impact}"
-    )
+    p1 = f"Problema Central:\nIdentificamos que no ecossistema de {area_label}, o principal gargalo enfrentado é {p_clean}. Essa dor acarreta perda de produtividade, custos elevados e falta de integração em fluxos estratégicos."
+    p2 = f"Solução e Tecnologia Aplicada:\nA {name_label} atua como solução tecnológica especializada, aplicando {', '.join(inferred_tags[:3])} para automatizar processos, estruturar dados e oferecer ferramentas inteligentes que resolvem diretamente o desafio relatado."
+    p3 = f"Modelo de Negócio e Público-Alvo:\nOperamos sob o modelo de {b_model}, atendendo {target_audience.lower()} com arquitetura escalável e suporte dedicado."
+    p4 = f"Diferencial e Impacto Esperado:\nEntregamos implantação ágil, redução mensurável de atrito operacional e governança em tempo real, gerando valor comprovado para clientes e parceiros corporativos."
 
-    return {
+    structured = f"{p1}\n\n{p2}\n\n{p3}\n\n{p4}"
+
+    return replace_pilot_with_poc({
         "enhancedText": structured,
         "tags": inferred_tags,
         "technologies": ", ".join(inferred_tags),
         "businessModel": b_model,
-        "howItWorks": how_it_works,
-        "differentiator": differentiator,
-        "impact": impact,
+        "howItWorks": p2,
+        "differentiator": p4,
+        "impact": "Redução mensurável de atrito operacional e ganho de escala.",
         "targetAudience": target_audience,
-    }
+    })
+
+
+def enhance_company_demands_text(
+    raw_text: str,
+    sector: str = "",
+    company_name: str = "",
+    operation_mode: str = "",
+) -> Dict[str, Any]:
+    """
+    Lê o texto de desafios e demandas operacionais escrito pela empresa,
+    aprimora e organiza de forma totalmente integrada ao que foi passado previamente
+    (sem templates engessados ou substituições artificiais), articulando a narrativa
+    em parágrafos executivos coesos baseados no texto fornecido.
+    """
+    clean_input = (raw_text or "").strip()
+    sector_label = (sector or "Operações Corporativas e Tecnologia").strip()
+    company_label = (company_name or "A Empresa").strip()
+    mode_label = (operation_mode or "POC + Compra").strip()
+
+    if client and clean_input:
+        prompt = f"""
+        Você é o arquiteto especialista em inovação aberta e contratações corporativas da plataforma StartIn.
+        A empresa '{company_label}' (Setor de atuação: {sector_label}, Modalidade preferencial: {mode_label}) forneceu as seguintes informações sobre seus desafios, processos e demandas:
+        \"\"\"{clean_input}\"\"\"
+
+        INSTRUÇÕES DE INTEGRAÇÃO TOTAL E SÍNTESE EXECUTIVA (SEM TEMPLATES ENGESSADOS):
+        1. INTEGRAÇÃO REAL DO TEXTO BASE:
+           - LEIA e COMPREENDA profundamente cada frase, detalhe, dor, público (ex: B2C, B2B), processos e objetivos que a empresa escreveu.
+           - NÃO jogue um template genérico por cima! NÃO cole o texto bruto sob um cabeçalho para depois preencher com textos padronizados pré-fabricados.
+           - REESCREVA E ARTICULE o conteúdo em uma narrativa executiva fluida, coesa e profissional, onde CADA parágrafo seja diretamente construído a partir das dores e necessidades reais que a empresa descreveu.
+           - Se a empresa mencionou B2C, foque a narrativa no relacionamento e esteira voltados para o consumidor final B2C. Se citou automação e dados, estruture em torno da modernização desses fluxos.
+        2. ESTRUTURAÇÃO EXECUTIVA ARTICULADA:
+           Organize o texto em seções temáticas fluidas (separadas por linha em branco):
+           - Desafio Operacional Central: apresente quem é a empresa e sintetize a dor ou gargalo prioritário que ela relatou.
+           - Demandas Tecnológicas & Escopo da Parceria: detalhe as soluções, ferramentas e automações que a empresa busca nas startups com base estrita no que ela descreveu.
+           - Modelo de Cooperação & Resultados Esperados: indique o formato de parceria ({mode_label}) e os ganhos concretos visados (eficiência, agilidade, redução de custos e escala).
+        3. FORMATO OBRIGATÓRIO:
+           - O campo "enhancedText" e todos os outros devem estar ESTRITAMENTE em texto plano puro, SEM NENHUM Markdown (absolutamente proibido usar *, **, #, ---, >, listas com -, crases ` ou tabelas |).
+        4. TAGS E TÓPICOS INTEGRADOS:
+           - Extraia entre 4 e 7 tags/tópicos concisos e fiéis que resumam as tecnologias e desafios relatados para alimentar o motor de matchmaking com startups.
+        5. TERMINOLOGIA OBRIGATÓRIA:
+           - Em relação à modalidade POC, utilize SEMPRE o termo 'prova de conceito' ou 'POC'. NUNCA utilize termos como 'piloto' ou 'piloto rápido' para designar POC.
+
+        Retorne ESTRITAMENTE um JSON válido com esta estrutura:
+        {{
+          "enhancedText": "Desafio Operacional Central:\\n[Parágrafo articulado sintetizando o contexto e a dor real informada]\\n\\nDemandas Tecnológicas & Escopo da Parceria:\\n[Parágrafo articulando as tecnologias e soluções esperadas com base no texto]\\n\\nModelo de Cooperação & Resultados Esperados:\\n[Parágrafo articulando o modelo {mode_label} e resultados esperados]",
+          "tags": ["Automação de Processos", "IA & Dados", "SaaS B2B", "Integração ERP"],
+          "technologies": "Automação de Processos, IA & Dados, SaaS B2B, Integração ERP",
+          "priorityTopics": ["Automação de Processos", "Inteligência Operacional", "Governança de Dados"],
+          "howItWorks": "Resumo articulado das demandas e escopo...",
+          "impact": "Resultados concretos e critérios de homologação..."
+        }}
+        """
+        for candidate_model in FALLBACK_MODELS:
+            try:
+                completion = client.chat.completions.create(
+                    model=candidate_model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Você é um especialista em inovação aberta, compras corporativas e desafios de POC para grandes empresas. Responda apenas em JSON válido.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.3,
+                )
+                parsed = json.loads(completion.choices[0].message.content or "{}")
+                if parsed.get("enhancedText"):
+                    tags = parsed.get("tags") or []
+                    if isinstance(tags, str):
+                        tags = [t.strip() for t in tags.split(",") if t.strip()]
+                    tags = [str(t).strip().lstrip("#") for t in tags if str(t).strip()][:7]
+                    if not tags:
+                        tags = [sector_label, "Inovação Aberta", "B2B", "Eficiência"]
+                    p_topics = parsed.get("priorityTopics") or tags[:4]
+                    if isinstance(p_topics, str):
+                        p_topics = [t.strip() for t in p_topics.split(",") if t.strip()]
+                    return replace_pilot_with_poc({
+                        "enhancedText": to_structured_plain_text(parsed["enhancedText"]),
+                        "tags": tags,
+                        "technologies": ", ".join(tags),
+                        "priorityTopics": p_topics,
+                        "howItWorks": parsed.get("howItWorks") or "",
+                        "impact": parsed.get("impact") or "",
+                    })
+            except Exception as e:
+                print(f"[StartIn IA] Aviso no modelo '{candidate_model}': {e}")
+
+    # Fallback determinístico semanticamente integrado ao texto fornecido
+    lower_in = f"{clean_input} {sector_label}".lower()
+    inferred_tags: List[str] = []
+    keyword_map = [
+        (["ia", "inteligência artificial", "machine learning", "dados", "analytics"], "IA & Dados"),
+        (["automa", "rpa", "fluxo", "manual", "processo"], "Automação de Processos"),
+        (["erp", "crm", "sap", "totvs", "sistema legado", "integra"], "Integração de Sistemas"),
+        (["saúde", "hospital", "prontuário", "paciente", "clínic"], "Healthtech"),
+        (["finan", "faturamento", "conciliação", "pagamento"], "Fintech & Gestão Financeira"),
+        (["logística", "rastreio", "frota", "estoque", "armazém"], "Logística & Supply Chain"),
+        (["segurança", "lgpd", "ciber", "compliance"], "Cibersegurança & Compliance"),
+        (["nuvem", "cloud", "api", "microsserviços"], "Cloud & APIs"),
+        (["b2c", "consumidor final", "cliente final"], "Operações B2C"),
+        (["b2b", "corporativ", "empresas"], "Operações B2B"),
+        (["poc", "prova de conceito", "homologação"], "POC / Prova de Conceito"),
+        (["compra", "escala", "fornecedor"], "Compra Corporativa"),
+    ]
+    for kws, tag_label in keyword_map:
+        if any(k in lower_in for k in kws) and tag_label not in inferred_tags:
+            inferred_tags.append(tag_label)
+
+    if sector_label and sector_label not in inferred_tags:
+        inferred_tags.insert(0, sector_label)
+    for default_t in ["Inovação Aberta", "Eficiência Operacional"]:
+        if len(inferred_tags) < 5 and default_t not in inferred_tags:
+            inferred_tags.append(default_t)
+    inferred_tags = inferred_tags[:6]
+
+    is_b2c = "b2c" in lower_in
+    segment_desc = "no segmento B2C (voltado ao consumidor final)" if is_b2c else "em operações corporativas"
+    core_text = clean_input.rstrip('.') if clean_input else f"Necessidade de automação de processos e eficiência no setor de {sector_label}"
+
+    p1 = f"Desafio Operacional Central:\nAtuando {segment_desc} no setor de {sector_label}, nossa organização enfrenta o desafio de {core_text}. O foco prioritário é modernizar processos manuais, eliminar retrabalho e trazer inteligência operacional para a esteira de atendimento e execução."
+    p2 = f"Demandas Tecnológicas & Escopo da Parceria:\nBuscamos soluções desenvolvidas por startups com competência comprovada em {', '.join(inferred_tags[:3])}, capazes de integrar-se de forma transparente à nossa arquitetura e proporcionar ganhos ágeis de produtividade."
+    p3 = f"Modelo de Cooperação & Resultados Esperados:\nPriorizamos projetos na modalidade {mode_label}, com testes estruturados e métricas claras. Esperamos como resultados mensuráveis a redução do tempo de ciclo de atendimento, diminuição de erros operacionais e escalabilidade sustentável."
+
+    structured = f"{p1}\n\n{p2}\n\n{p3}"
+
+    return replace_pilot_with_poc({
+        "enhancedText": structured,
+        "tags": inferred_tags,
+        "technologies": ", ".join(inferred_tags),
+        "priorityTopics": inferred_tags[:4],
+        "howItWorks": p2,
+        "impact": "Redução do tempo de ciclo, diminuição de erros e escalabilidade operacional.",
+    })
+
 
 
 def verify_traction_document(
@@ -2451,7 +2709,7 @@ def _build_intelligent_contextual_reply(
                 f"Checklist de Documentação Recomendada{target_label}:\n\n"
                 f"1. Cartão CNPJ ativo e dados cadastrais atualizados da {s_name}.\n"
                 f"2. Proposta Técnica Executiva contendo escopo, arquitetura tecnológica ({s_tech}), cronograma e KPIs de sucesso.\n"
-                f"3. {'Atestado de Capacidade Técnica / cases comerciais comprovando operação em escala (TRL ' + str(s_trl) + '/9).' if 'tra' in s_stage.lower() else 'Demonstração funcional do MVP e plano de validação piloto com métricas claras.'}\n"
+                f"3. {'Atestado de Capacidade Técnica / cases comerciais comprovando operação em escala (TRL ' + str(s_trl) + '/9).' if 'tra' in s_stage.lower() else 'Demonstração funcional do MVP e plano de validação de prova de conceito (POC) com métricas claras.'}\n"
                 f"4. Estimativa comercial ou modelo de licenciamento ({s_model}) alinhado à governança de compras de {opp_company}.\n"
                 f"5. Declaração de conformidade com LGPD e segurança da informação."
             )
@@ -2594,7 +2852,7 @@ def _build_intelligent_contextual_reply(
         return (
             f"Orientação sobre Orçamento e Precificação ({context_ref}):\n\n"
             f"1. Para Editais de Fomento / Subvenção: Estruture o orçamento separando rubricas de custeio (equipe de P&D em {s_tech}, serviços de nuvem/infraestrutura e testes de validação), evitando despesas administrativas genéricas não financiáveis.\n"
-            f"2. Para POCs e Primeira Compra: Precifique cobrindo setup + licença piloto por período fechado (ex: 3 meses), deixando pré-acordada a faixa de assinatura {s_model} em caso de aprovação dos KPIs.\n"
+            f"2. Para POCs e Primeira Compra: Precifique cobrindo setup + licença de prova de conceito (POC) por período fechado (ex: 3 meses), deixando pré-acordada a faixa de assinatura {s_model} em caso de aprovação dos KPIs.\n"
             f"3. Para Compra Corporativa em Tração: Apresente proposta comercial baseada em valor/ROI gerado sobre a dor principal que a {s_name} resolve, com SLA definido e faixas de volume."
         )
 

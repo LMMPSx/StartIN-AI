@@ -24,23 +24,54 @@ Para garantir transparência, reprodutibilidade matemática e ausência de notas
 
 ## ⚖️ 2. Auditoria da Balança de Matchmaking (40% / 30% / 30%)
 
-### 2.1 Fórmula Matemática Oficial
+### 2.1 Fórmula Matemática Oficial e Decomposição em 10 Subtópicos Técnicos
 
 ```text
-Score Final (0% a 100%) = Pilar_Area (0 a 40) + Pilar_Tecnologias (0 a 30) + Pilar_Demais (0 a 30)
+Score Final (0% a 100%) = Tópico_1_Area (0 a 40) + Tópico_2_Tecnologias (0 a 30) + Tópico_3_Contexto_Maturidade (0 a 30)
 ```
 
-Onde `Pilar_Demais (0 a 30)` é decomposto de forma fixa e auditável em quatro subcritérios objetivos:
+O cálculo é tecnicamente auditado em **10 subtópicos granulares**, retornados individualmente no objeto `subtopics` de cada match:
 
-| Pilar / Subcritério Auditado | Peso Oficial | Pontuação (`pts`) | Campos Auditados (Startup × Alvo) | Exibição nos 4 Cards da UI (`reasons`) |
-|---|---:|---:|---|---|
-| **1. Área de Atuação / Setor** | **40%** | `0` a `40` | `mainArea`, `mainSector` × `sector`, `title`, `tags`, `demands`, `description` | `reasons.perfil` (`X/40 pts`) |
-| **2. Tecnologias Iguais / Compatíveis** | **30%** | `0` a `30` | `technologies`, `tags`, `areasOfInterest`, `howItWorks` × `tags`, `title`, `description`, `demands` | `reasons.requisitos` (`Y/30 pts`) |
-| **3.1 Estágio de Maturidade & TRL NASA** | **10%** | `0` a `10` | `currentStage` (`Validação` / `Tração`), `trlScore` (`1–9`), `tractionAttested` × `type`, `operationMode`, `preferredStage` | `reasons.objetivo` (soma `3.1 + 3.2` -> `Z1/20 pts`) |
-| **3.2 Modalidade & Modelo de Negócio** | **10%** | `0` a `10` | `opportunityTypes`, `mainObjective`, `investmentNeed` (`0..6`) + `businessModel` (`0..4`) × modalidade do alvo | `reasons.objetivo` (soma `3.1 + 3.2` -> `Z1/20 pts`) |
-| **3.3 Afinidade Semântica Problema × Demanda** | **5%** | `0` a `5` | `problem`, `howItWorks`, `differentiator`, `impact` × `description`, `shortDescription`, `demands` | `reasons.contexto` (soma `3.3 + 3.4` -> `Z2/10 pts`) |
-| **3.4 Localização, Região & Formato** | **5%** | `0` a `5` | `location`, `state`, `operationRegion` × `location`, `meta`, `metaInfo`, `deadline` | `reasons.contexto` (soma `3.3 + 3.4` -> `Z2/10 pts`) |
-| **TOTAL AUDITADO** | **100%** | **`0` a `100`** | **Crescimento progressivo sem piso mínimo artificial** | **Soma exata dos 4 cards = `matchScore%`** |
+| Macro-Tópico Auditado | Subtópico Técnico | Pontuação Máx. | Critério Técnico e Variáveis Analisadas |
+|---|---|---:|---|
+| **Tópico 1 — Área de Atuação e Mercado (40 pts)** | **1.1 Domínio Macro-Setorial** | **25 pts** | Sobreposição entre clusters canônicos (`saude_biotech`, `financas_seguros`, `agro_alimentos`, etc.). Concede `25 pts` para o mesmo cluster primário, `15–18 pts` para escopo corporativo amplo/multissetorial com aderência contextual e `0 pts` para setores conflitantes. |
+| | **1.2 Vocabulário Técnico & Nicho** | **10 pts** | Frequência e densidade de termos especializados de nicho encontrados simultaneamente na Startup e no Alvo (`sub_hits`), crescendo progressivamente até `10 pts` (ex: *hospital*, *prontuário*, *telemedicina*). |
+| | **1.3 Segmento de Aplicação & Bônus de Rótulo** | **5 pts** | Match direto e literal do rótulo da área cadastrada (`bonus_rotulo`) ou sinergia de aplicação específica no mercado corporativo B2B. |
+| **Tópico 2 — Tecnologias e Stack Técnica (30 pts)** | **2.1 Cobertura da Stack Essencial** | **18 pts** | Razão matemática de cobertura entre as tecnologias dominadas pela startup e as exigidas pelo desafio/edital: `round(18 * min(1.0, n_matched / req_count))`. |
+| | **2.2 Densidade Tecnológica / Volume** | **8 pts** | Volume cumulativo de competências coincidentes: `+3 pts` para 1 tecnologia, `+5 pts` para 2, `+7 pts` para 3, `+8 pts` para 4 ou mais tecnologias em comum. |
+| | **2.3 Arquitetura & Integrações** | **4 pts** | Compatibilidade de modelo arquitetural e camadas de integração corporativa (ex: APIs REST/HL7/FHIR, Microsserviços, Nuvem AWS/GCP/Azure, ERP, Mobile). |
+| **Tópico 3 — Maturidade, Modalidade e Contexto (30 pts)** | **3.1 Estágio de Maturidade & TRL NASA** | **10 pts** | Validação vs Tração: para Validação, MVP testado (`TRL 4–6`) pontua em POCs e Primeira Compra; para Tração, sistema homologado (`TRL 7–9`) com Atestado de Capacidade Técnica pontua em Compras diretas. Editais de fomento e Eventos pontuam conforme o escopo da chamada (`7 a 10 pts`). |
+| | **3.2 Modalidade & Modelo de Negócio B2B** | **10 pts** | Convergência entre a modalidade da oportunidade (`Edital`, `POC`, `Primeira Compra`, `Compra`, `Evento`) e as preferências `opportunityTypes` da startup (`0 a 6 pts`), somada à solidez do modelo de receita (`SaaS B2B`, `Enterprise`, `Licenciamento`) (`0 a 4 pts`). |
+| | **3.3 Semântica Problema × Demanda** | **5 pts** | Afinidade semântica entre os desafios operacionais descritos e a solução técnica ofertada, calculada por interseção de radicais conceituais e refinada pelo modelo Groq (`0 a 5 pts`). |
+| | **3.4 Localização, Região & Formato** | **5 pts** | Aderência geográfica e de formato: `5 pts` para mesma cidade/UF ou evento compatível; `4 pts` para abrangência Nacional/Remota/Online; `1 pt` para editais com trava regional exclusiva de outro estado. |
+| **TOTAL GERAL AUDITADO** | **10 Subtópicos Técnicos** | **100 pts** | **Soma matemática exata de todos os subtópicos, sem piso fictício.** |
+
+---
+
+### 2.2 Estrutura do Dicionário `subtopics` no Retorno JSON da API
+
+Cada item avaliado pelo motor Python ou Java retorna o detalhamento completo dos 10 subtópicos no objeto `subtopics`:
+
+```json
+{
+  "totalScore": 84,
+  "areaScore": 40,
+  "techScore": 17,
+  "otherScore": 27,
+  "subtopics": {
+    "macro_domain": 25,
+    "niche_vocabulary": 10,
+    "market_segment": 5,
+    "stack_coverage": 9,
+    "tech_density": 5,
+    "architecture_compatibility": 3,
+    "stage_trl": 10,
+    "modality_model": 10,
+    "problem_semantic": 3,
+    "location_format": 4
+  }
+}
+```
 
 ---
 
@@ -251,6 +282,7 @@ python -c "import IA; b = IA.compute_audited_match_breakdown({'mainArea':'Saúde
 | `POST` | `/api/ai/match-companies` | Calcula o match auditado (`40/30/30`) de uma Startup contra todas as Empresas cadastradas |
 | `POST` | `/api/ai/chat` | Assistente de templates, propostas e dúvidas sobre editais em texto plano puro (suporta anexos PDF/DOCX/TXT) |
 | `POST` | `/api/ai/enhance-problem` | Estrutura o problema/solução da startup em texto plano e extrai tecnologias e modelo de negócio |
+| `POST` | `/api/ai/enhance-company-demands` | Estrutura os desafios e demandas operacionais da empresa em texto plano executivo e extrai tags/tópicos |
 | `POST` | `/api/ai/verify-traction-pdf` | Audita o PDF de Atestado de Capacidade Técnica junto à escala TRL da NASA (`1–9`) |
 | `POST` | `/api/ai/scrape-opportunities` | Executa raspagem sob demanda dos portais oficiais de editais com deep links |
 | `GET`/`POST` | `/api/ai/daily-scrape-json` | Dispara manualmente a rotina completa de scraping + matchmaking auditado das 08:00 |

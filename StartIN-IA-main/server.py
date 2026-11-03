@@ -20,6 +20,7 @@ from IA import (
     evaluate_startup_to_companies_matches,
     generate_assistant_chat,
     enhance_startup_problem_text,
+    enhance_company_demands_text,
     verify_traction_document,
     scrape_real_web_opportunities,
     fetch_user_and_startup_from_backend,
@@ -229,6 +230,14 @@ class EnhanceProblemRequest(BaseModel):
     startupName: Optional[str] = ""
 
 
+class EnhanceCompanyDemandsRequest(BaseModel):
+    text: str
+    sector: Optional[str] = ""
+    companyName: Optional[str] = ""
+    operationMode: Optional[str] = ""
+
+
+
 class VerifyTractionRequest(BaseModel):
     fileName: str
     fileBase64: str
@@ -418,6 +427,22 @@ def enhance_problem_endpoint(request: EnhanceProblemRequest):
         main_area=request.mainArea or "",
         startup_name=request.startupName or "",
     )
+
+
+@app.post("/api/ai/enhance-company-demands")
+def enhance_company_demands_endpoint(request: EnhanceCompanyDemandsRequest):
+    """
+    Lê o texto de desafios e demandas operacionais da empresa, melhora e estrutura
+    o conteúdo mantendo 100% de coerência e fidelidade com o que foi escrito,
+    e extrai tags e tópicos prioritários para o matchmaking com startups.
+    """
+    return enhance_company_demands_text(
+        raw_text=request.text,
+        sector=request.sector or "",
+        company_name=request.companyName or "",
+        operation_mode=request.operationMode or "",
+    )
+
 
 
 @app.post("/api/ai/verify-traction-pdf")
