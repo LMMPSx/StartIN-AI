@@ -18,6 +18,10 @@ from IA import (
     evaluate_startup_matches,
     evaluate_company_to_startups_matches,
     evaluate_startup_to_companies_matches,
+    evaluate_startup_to_providers_matches,
+    evaluate_provider_to_startups_matches,
+    evaluate_provider_to_opportunities_matches,
+    enhance_provider_services_text,
     generate_assistant_chat,
     enhance_startup_problem_text,
     enhance_company_demands_text,
@@ -211,9 +215,12 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
+    accountType: Optional[str] = "STARTUP"
     startup: Optional[StartupProfileInput] = None
     startupId: Optional[int] = None
+    providerId: Optional[int] = None
     userId: Optional[int] = None
+    provider: Optional[dict] = None
     selectedOpportunity: Optional[dict] = None
     attachmentName: Optional[str] = None
     attachmentBase64: Optional[str] = None
@@ -235,6 +242,15 @@ class EnhanceCompanyDemandsRequest(BaseModel):
     sector: Optional[str] = ""
     companyName: Optional[str] = ""
     operationMode: Optional[str] = ""
+
+
+class EnhanceProviderServicesRequest(BaseModel):
+    text: str
+    category: Optional[str] = ""
+    providerName: Optional[str] = ""
+    mainService: Optional[str] = ""
+    providerType: Optional[str] = "PROFISSIONAL"
+    fieldType: Optional[str] = "bio"
 
 
 
@@ -444,6 +460,53 @@ def enhance_company_demands_endpoint(request: EnhanceCompanyDemandsRequest):
     )
 
 
+@app.post("/api/ai/enhance-provider-services")
+def enhance_provider_services_endpoint(request: EnhanceProviderServicesRequest):
+    """
+    Lê a descrição de serviços do prestador de tecnologia/design, estrutura a proposta
+    técnica mantendo total fidelidade e extrai especialidades e tags para matching com startups.
+    """
+    return enhance_provider_services_text(
+        raw_text=request.text,
+        category=request.category or "",
+        provider_name=request.providerName or "",
+        main_service=request.mainService or "",
+        provider_type=request.providerType or "PROFISSIONAL",
+        field_type=request.fieldType or "bio",
+    )
+
+
+@app.post("/api/ai/match-providers")
+def match_providers_endpoint(payload: dict):
+    """
+    Calcula a compatibilidade entre uma startup e prestadores de serviços de tecnologia.
+    """
+    startup = payload.get("startup") or {}
+    providers = payload.get("providers") or []
+    return evaluate_startup_to_providers_matches(startup, providers)
+
+
+@app.post("/api/ai/match-provider-startups")
+def match_provider_to_startups_endpoint(payload: dict):
+    """
+    Calcula a compatibilidade real entre um prestador de serviços e as startups em Tração.
+    """
+    provider = payload.get("provider") or {}
+    startups = payload.get("startups") or []
+    return evaluate_provider_to_startups_matches(provider, startups)
+
+
+@app.post("/api/ai/match-provider-opportunities")
+def match_provider_to_opportunities_endpoint(payload: dict):
+    """
+    Calcula a compatibilidade real entre um prestador de serviços e as oportunidades
+    (demandas de serviço) lançadas por startups em Tração.
+    """
+    provider = payload.get("provider") or {}
+    opportunities = payload.get("opportunities") or []
+    return evaluate_provider_to_opportunities_matches(provider, opportunities)
+
+
 
 @app.post("/api/ai/verify-traction-pdf")
 def verify_traction_pdf_endpoint(request: VerifyTractionRequest):
@@ -465,8 +528,8 @@ def verify_traction_pdf_endpoint(request: VerifyTractionRequest):
 def chat_assistant_endpoint(request: ChatRequest):
     """
     Endpoint do Assistente Virtual Inteligente:
-    - Elabora templates, propostas técnicas, pitches e textos personalizados para oportunidades.
-    - Suporta oportunidade selecionada (ex: vinda de Salvos) e arquivos anexados (PDF/DOCX/TXT).
+    - Elabora templates, propostas técnicas, pitches e textos personalizados para oportunidades e conexões.
+    - Suporta tanto Startups quanto Prestadores de Serviços, além de arquivos anexados (PDF/DOCX/TXT).
     """
     msgs = [{"from": m.from_, "text": m.text} for m in request.messages]
     startup_dict = request.startup.model_dump() if request.startup else {}
@@ -475,6 +538,12 @@ def chat_assistant_endpoint(request: ChatRequest):
     if request.userId and not startup_dict.get("userId"):
         startup_dict["userId"] = request.userId
 
+    provider_dict = dict(request.provider) if isinstance(request.provider, dict) else {}
+    if request.providerId and not provider_dict.get("id"):
+        provider_dict["id"] = request.providerId
+    if request.userId and not provider_dict.get("userId"):
+        provider_dict["userId"] = request.userId
+
     reply = generate_assistant_chat(
         messages=msgs,
         startup_profile=startup_dict,
@@ -482,6 +551,8 @@ def chat_assistant_endpoint(request: ChatRequest):
         attachment_name=request.attachmentName,
         attachment_base64=request.attachmentBase64,
         attachment_text=request.attachmentText,
+        account_type=request.accountType or ("PROVIDER" if provider_dict else "STARTUP"),
+        provider_profile=provider_dict if provider_dict else None,
     )
     return ChatResponse(reply=reply)
 

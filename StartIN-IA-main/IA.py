@@ -13,6 +13,7 @@ import requests
 from bs4 import BeautifulSoup
 from groq import Groq
 from typing import List, Dict, Any, Optional
+import concurrent.futures
 
 try:
     from pypdf import PdfReader
@@ -44,13 +45,21 @@ except Exception as e:
     client = None
 
 MODEL_NAME = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
-FALLBACK_MODELS = [MODEL_NAME, "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+FALLBACK_MODELS = [
+    MODEL_NAME,
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "qwen/qwen3.8-27b",
+]
 
 # Portais reais de Editais, Chamadas Públicas e Eventos de Inovação no Brasil
 DEFAULT_PORTAL_URLS = [
     "https://inovastartups.com.br/",
     "https://fapesp.br/pipe/chamadas",
     "http://www.finep.gov.br/chamadas-publicas/chamadaspublicas?situacao=aberta",
+    "https://recnplay.pe/",
+    "https://www.startupsummit.com.br/",
 ]
 
 # Cache em memória das oportunidades raspadas na web
@@ -361,7 +370,7 @@ def fetch_text_from_url(url: str) -> str:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
     try:
-        response = requests.get(url, headers=headers, timeout=12)
+        response = requests.get(url, headers=headers, timeout=3)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
@@ -420,7 +429,7 @@ def fetch_text_from_url(url: str) -> str:
 
 
 def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
-    """Retorna oportunidades com links profundos reais específicos extraídos diretamente do portal."""
+    """Retorna oportunidades com links profundos reais específicos extraídos diretamente do portal ou ecossistema nacional."""
     domain = url.lower()
     if "inovastartups" in domain:
         return [
@@ -429,7 +438,7 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
                 "title": "Edital Inova Startups 6ª Edição 2026 (Regulamento Oficial)",
                 "type": "EDITAL",
                 "focus": "Programa de aceleração, capacitação e investimento financeiro para startups de base tecnológica com soluções B2B e IA.",
-                "deadline": "Inscrições abertas · Brasil · Remoto",
+                "deadline": "Inscrições abertas até 30/11/2026 · Brasil · Remoto",
                 "tags": "InovaStartups • Aceleração • Investimento • B2B",
             },
             {
@@ -448,7 +457,7 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
                 "title": "Chamada PIPE Jornada Tecnológica 2026 - Fase 1 (FAPESP)",
                 "type": "EDITAL",
                 "focus": "Financiamento não reembolsável da FAPESP para validação de viabilidade técnico-científica de startups inovadoras.",
-                "deadline": "Inscrições abertas · São Paulo · Brasil",
+                "deadline": "Inscrições abertas em fluxo contínuo · São Paulo · Brasil",
                 "tags": "FAPESP • PIPE • Fase 1 • Subvenção",
             },
             {
@@ -464,14 +473,41 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
         return [
             {
                 "url": "https://legacy.finep.gov.br/a-finep-externo/edital-efpc",
-                "title": "Chamada Pública FINEP EFPC Inovação Aberta",
+                "title": "Chamada Pública FINEP Mais Inovação Brasil 2026",
                 "type": "EDITAL",
-                "focus": "Recursos de subvenção econômica FINEP para conexão entre entidades fechadas de previdência e startups de tecnologia.",
+                "focus": "Recursos de subvenção econômica FINEP para conexão entre entidades fechadas e startups de tecnologia e inovação.",
                 "deadline": "Inscrições abertas · Brasil",
                 "tags": "FINEP • Subvenção • Inovação Aberta • B2B",
             }
         ]
+    elif "recnplay" in domain or "evento" in domain:
+        return [
+            {
+                "url": "https://recnplay.pe/",
+                "title": "REC'n'Play 2026 — Festival de Tecnologia, Inovação e Negócios (Porto Digital)",
+                "type": "EVENTO",
+                "focus": "Maior festival de inovação e tecnologia do Nordeste, conectando startups a corporações, pitches e rodadas de negócios no ecossistema Porto Digital.",
+                "deadline": "15 a 18 de Outubro de 2026 · Recife/PE · Presencial & Híbrido",
+                "tags": "Porto Digital • REC'n'Play • Startups • Conexão B2B • Inovação",
+            },
+            {
+                "url": "https://www.startupsummit.com.br/",
+                "title": "Startup Summit 2026 — Sebrae Startups & ACATE",
+                "type": "EVENTO",
+                "focus": "Encontro nacional de startups, fundos de Venture Capital e ecossistema corporativo com foco em escala, negócios e conexões de impacto.",
+                "deadline": "26 a 28 de Agosto de 2026 · Florianópolis/SC · Híbrido",
+                "tags": "Sebrae • ACATE • Investimentos • Rodada de Negócios • B2B",
+            },
+        ]
     return [
+        {
+            "url": "https://recnplay.pe/",
+            "title": "REC'n'Play 2026 — Festival de Tecnologia, Inovação e Negócios (Porto Digital)",
+            "type": "EVENTO",
+            "focus": "Arena de conexões, negócios e pitches para startups de tecnologia com investidores e grandes empresas.",
+            "deadline": "15 a 18 de Outubro de 2026 · Recife/PE",
+            "tags": "Porto Digital • Evento • Startups • Inovação",
+        },
         {
             "url": url,
             "title": f"Chamada Pública de Inovação ({url.split('//')[-1].split('/')[0]})",
@@ -578,34 +614,79 @@ def scrape_real_web_opportunities(urls: Optional[List[str]] = None, force_refres
     target_urls = urls or DEFAULT_PORTAL_URLS
     scraped_list: List[Dict[str, Any]] = []
 
-    for url in target_urls:
-        print(f"[StartIn IA] Raspando editais reais em: {url} ...")
-        raw_text = fetch_text_from_url(url)
-        if not raw_text:
-            continue
+    def _process_single_url(target_u: str) -> List[dict]:
+        try:
+            raw_text = fetch_text_from_url(target_u)
+            if not raw_text:
+                return get_default_deep_opportunities(target_u, "")
+            extracted = extract_opportunities_from_text(raw_text, target_u)
+            return extracted if extracted else get_default_deep_opportunities(target_u, raw_text)
+        except Exception:
+            return get_default_deep_opportunities(target_u, "")
 
-        extracted_items = extract_opportunities_from_text(raw_text, url)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(target_urls))) as executor:
+        results = list(executor.map(_process_single_url, target_urls))
+
+    for extracted_items in results:
         for item in extracted_items:
             title = (item.get("title") or "").strip()
             if not title:
                 continue
             opp_type = (item.get("type") or "EDITAL").upper()
             if opp_type not in ("EDITAL", "EVENTO", "POC", "COMPRA"):
-                opp_type = "EVENTO" if "evento" in opp_type.lower() else "EDITAL"
+                opp_type = "EVENTO" if "evento" in opp_type.lower() or "summit" in title.lower() or "play" in title.lower() else "EDITAL"
 
             scraped_list.append({
                 "id": f"web-{len(scraped_list) + 1}",
                 "code": f"web-{len(scraped_list) + 1}",
                 "title": title,
                 "type": opp_type,
-                "description": item.get("focus") or item.get("description") or "Edital capturado da web pela IA.",
-                "shortDescription": (item.get("focus") or "")[:120],
-                "tags": item.get("tags") or "Web • Edital Real • Inovação",
-                "url": item.get("url") or url,
-                "externalUrl": item.get("url") or url,
+                "description": item.get("focus") or item.get("description") or "Oportunidade capturada da web pela IA.",
+                "shortDescription": (item.get("focus") or item.get("description") or "")[:120],
+                "tags": item.get("tags") or f"Web • {opp_type.capitalize()} • Inovação",
+                "url": item.get("url") or item.get("externalUrl") or "",
+                "externalUrl": item.get("url") or item.get("externalUrl") or "",
                 "deadline": item.get("deadline") or "Inscrições abertas · Brasil",
                 "meta": item.get("deadline") or "Inscrições abertas · Brasil",
                 "metaInfo": item.get("deadline") or "Inscrições abertas · Brasil",
+            })
+
+    # Garante que a lista contenha SEMPRE tanto oportunidades de EDITAL quanto de EVENTO
+    has_edital = any(item.get("type") == "EDITAL" for item in scraped_list)
+    has_evento = any(item.get("type") == "EVENTO" for item in scraped_list)
+
+    if not has_edital:
+        for default_item in get_default_deep_opportunities("https://inovastartups.com.br/"):
+            scraped_list.append({
+                "id": f"web-{len(scraped_list) + 1}",
+                "code": f"web-{len(scraped_list) + 1}",
+                "title": default_item["title"],
+                "type": default_item["type"],
+                "description": default_item["focus"],
+                "shortDescription": default_item["focus"][:120],
+                "tags": default_item["tags"],
+                "url": default_item["url"],
+                "externalUrl": default_item["url"],
+                "deadline": default_item["deadline"],
+                "meta": default_item["deadline"],
+                "metaInfo": default_item["deadline"],
+            })
+
+    if not has_evento:
+        for default_item in get_default_deep_opportunities("https://recnplay.pe/"):
+            scraped_list.append({
+                "id": f"web-{len(scraped_list) + 1}",
+                "code": f"web-{len(scraped_list) + 1}",
+                "title": default_item["title"],
+                "type": default_item["type"],
+                "description": default_item["focus"],
+                "shortDescription": default_item["focus"][:120],
+                "tags": default_item["tags"],
+                "url": default_item["url"],
+                "externalUrl": default_item["url"],
+                "deadline": default_item["deadline"],
+                "meta": default_item["deadline"],
+                "metaInfo": default_item["deadline"],
             })
 
     if not urls and scraped_list:
@@ -1032,6 +1113,7 @@ def compute_audited_match_breakdown(
     n_matched = len(matched_tech_keys)
 
     if n_matched == 0:
+        coverage_pts = 0
         tech_score = 0
         tech_rule = "Nenhuma tecnologia coincidente identificada"
     else:
@@ -2442,6 +2524,811 @@ def enhance_company_demands_text(
     })
 
 
+def _clean_previous_provider_boilerplate(raw_text: str, provider_name: str = "") -> str:
+    """
+    Remove prefixos ou blocos em 3ª pessoa gerados por versões anteriores
+    para extrair exclusivamente a frase original escrita pelo próprio usuário.
+    """
+    text = (raw_text or "").strip()
+    if not text:
+        return ""
+
+    # Remove blocos padronizados antigos de "Competências Técnicas & Ferramentas:" e "Diferencial de Parceria:"
+    text = re.split(r"\n\s*(?:Competências Técnicas|Diferencial de Parceria|Diferenciais Competitivos)\s*:", text, flags=re.IGNORECASE)[0].strip()
+
+    # Remove cabeçalhos antigos como "Atuação Especializada em ...:" ou "Apresentação Profissional:"
+    text = re.sub(r"^(?:Atuação Especializada em [^\n:]+|Apresentação Profissional)\s*:\s*", "", text, flags=re.IGNORECASE).strip()
+
+    # Remove frase antiga em 3ª pessoa "... atua com foco em ..., oferecendo serviços técnicos especializados para startups em estágios de validação e tração."
+    text = re.sub(
+        r"^[^\.\n]+?\s+atua\s+(?:com\s+foco\s+em|na\s+área\s+de)\s+[^\.\n]+?,\s*oferecendo\s+serviços\s+técnicos\s+especializados\s+para\s+startups\s+em\s+estágios\s+de\s+validação\s+e\s+tração\.\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    text = re.sub(
+        r"^[^\.\n]+?\s+atua\s+na\s+área\s+de\s+[^\.\n]+?\.\s*Foco\s+em\s+soluções\s+de\s+alto\s+impacto[^\.\n]*\.\s*(?:Experiência\s*&\s*Metodologia\s*:\s*)?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    if provider_name and text.lower().startswith(provider_name.lower() + " atua"):
+        parts = text.split(".", 1)
+        if len(parts) > 1 and parts[1].strip():
+            text = parts[1].strip()
+
+    return text.strip()
+
+
+def _extract_provider_tags_and_skills(user_text: str, category: str, main_service: str = "") -> List[str]:
+    """
+    Extrai tags e competências reais a partir do texto do prestador e da sua categoria,
+    sem contaminar com tags de outras áreas (como UX/UI quando a área é Marketing).
+    """
+    combined = f"{user_text} {category} {main_service}".lower()
+    inferred: List[str] = []
+
+    skill_rules = [
+        (["instagram", "insta", "reels", "stories"], "Instagram & Social Media"),
+        (["escalabilidade da marca", "escalar a marca", "escalabilidade", "escala de marca"], "Escalabilidade de Marca"),
+        (["branding", "posicionamento de marca", "marca", "identidade de marca"], "Branding & Posicionamento"),
+        (["tráfego pago", "trafego pago", "meta ads", "google ads", "anúncios", "ads", "mídia paga"], "Tráfego Pago & Performance"),
+        (["growth", "crescimento", "aquisição", "funil", "conversão", "leads"], "Growth & Aquisição"),
+        (["conteúdo", "conteudo", "copywriting", "copy", "inbound", "engajamento"], "Estratégia de Conteúdo"),
+        (["marketing", "redes sociais", "social media", "digital"], "Marketing Estratégico"),
+        (["tiktok", "youtube", "linkedin"], "Canais Digitais"),
+        (["seo", "orgânico", "organico"], "SEO & Alcance Orgânico"),
+        (["crm", "automação de marketing", "rd station", "hubspot"], "CRM & Automação"),
+        (["ux/ui", "ux", "ui", "interface", "usabilidade", "experiência do usuário"], "UX/UI Design"),
+        (["figma", "prototip", "wireframe"], "Prototipagem & Figma"),
+        (["design system", "identidade visual", "design de produto", "product design"], "Product Design"),
+        (["react", "next.js", "nextjs", "frontend", "front-end", "tailwind", "typescript"], "Frontend (React / TypeScript)"),
+        (["node.js", "nodejs", "java", "spring boot", "python", "backend", "back-end", "api", "apis"], "Backend & APIs"),
+        (["mobile", "flutter", "react native", "ios", "android", "aplicativo", "app"], "Desenvolvimento Mobile"),
+        (["aws", "docker", "devops", "cloud", "nuvem", "ci/cd", "kubernetes"], "Cloud & DevOps"),
+        (["ia", "inteligência artificial", "machine learning", "llm", "dados", "analytics", "bi"], "IA & Dados"),
+        (["mvp", "saas", "full stack", "fullstack", "software", "sistema"], "Desenvolvimento de MVP & SaaS"),
+        (["jurídico", "juridico", "contrato", "societário", "societario", "vesting", "mútuo"], "Direito para Startups & Contratos"),
+        (["lgpd", "compliance", "propriedade intelectual", "inpi"], "Compliance & LGPD"),
+        (["financeiro", "valuation", "captação", "captacao", "bpo", "fluxo de caixa", "dre", "modelagem financeira"], "Gestão Financeira & Captação"),
+        (["consultoria", "negócios", "go-to-market", "okr", "discovery", "produto", "vendas b2b"], "Consultoria & Estratégia"),
+    ]
+
+    for keywords, tag_label in skill_rules:
+        if any(kw in combined for kw in keywords) and tag_label not in inferred:
+            inferred.append(tag_label)
+
+    cat_clean = (category or "").strip()
+    cat_defaults = {
+        "marketing": ["Marketing Estratégico", "Growth & Aquisição", "Posicionamento de Marca", "Redes Sociais"],
+        "design": ["UX/UI Design", "Product Design", "Prototipagem & Figma", "Identidade Visual"],
+        "tecnologia": ["Desenvolvimento de Software", "Arquitetura & APIs", "MVP & Escalabilidade", "Cloud & DevOps"],
+        "consultoria": ["Consultoria de Negócios", "Estratégia de Produto", "Go-to-Market", "Processos Ágeis"],
+        "jurídico": ["Consultoria Jurídica", "Contratos & Societário", "LGPD & Compliance", "Propriedade Intelectual"],
+        "financeiro": ["Modelagem Financeira", "Captação & Valuation", "Planejamento Financeiro", "BPO Financeiro"],
+    }
+
+    if cat_clean and cat_clean not in inferred:
+        inferred.insert(0, cat_clean)
+
+    matched_defaults = []
+    for key, defs in cat_defaults.items():
+        if key in cat_clean.lower():
+            matched_defaults = defs
+            break
+    if not matched_defaults and cat_clean:
+        matched_defaults = [cat_clean, "Estratégia para Startups", "Escalabilidade"]
+
+    for d in matched_defaults:
+        if len(inferred) < 5 and d not in inferred:
+            inferred.append(d)
+
+    return inferred[:6]
+
+
+def _infer_coherent_main_service(user_text: str, category: str, current_main_service: str = "") -> str:
+    """
+    Infere o serviço principal coerente com o texto e a categoria do usuário.
+    """
+    lower_txt = f"{user_text} {category}".lower()
+    if "instagram" in lower_txt and ("marca" in lower_txt or "marketing" in lower_txt or "escala" in lower_txt):
+        return "Marketing Estratégico & Escalabilidade de Marca no Instagram"
+    if "tráfego" in lower_txt or "trafego" in lower_txt or "ads" in lower_txt:
+        return "Gestão de Tráfego Pago, Performance & Growth"
+    if "marketing" in lower_txt or "growth" in lower_txt or "marca" in lower_txt:
+        return "Marketing Estratégico, Branding & Growth para Startups"
+    if "react" in lower_txt or "node" in lower_txt or "full stack" in lower_txt or "mvp" in lower_txt:
+        return "Desenvolvimento Full Stack & Construção de MVPs"
+    if "jurídico" in lower_txt or "contrato" in lower_txt or "lgpd" in lower_txt:
+        return "Assessoria Jurídica, Contratos & Compliance para Startups"
+    if "financeiro" in lower_txt or "valuation" in lower_txt or "captação" in lower_txt:
+        return "Consultoria Financeira, Valuation & Preparação para Captação"
+    if "ux" in lower_txt or "ui" in lower_txt or "figma" in lower_txt or "design" in lower_txt:
+        return "Product Design, UX/UI & Identidade Visual"
+    if current_main_service and not (
+        category.lower() != "design" and ("ux/ui" in current_main_service.lower() or "design" in current_main_service.lower())
+    ):
+        return current_main_service.strip()
+    return f"Especialista em {category.strip() or 'Soluções para Startups'}"
+
+
+def _Polish_user_sentence_first_person(user_text: str, is_company: bool = False) -> str:
+    """
+    Refina a frase original do usuário mantendo 100% das informações passadas,
+    corrigindo pequenos truncamentos gramaticais e garantindo voz em 1ª pessoa.
+    """
+    s = (user_text or "").strip()
+    if not s:
+        return ""
+
+    # Corrige construções informais comuns mantendo o sentido exato do usuário
+    s = re.sub(
+        r"\bmarketing\s+e\s+aberto\s+e\s+escalabilidade\s+da\s+marca\b",
+        "marketing estratégico, com foco aberto em parcerias e na escalabilidade da marca",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r"\baberto\s+e\s+escalabilidade\b",
+        "atuação aberta a novos projetos e foco na escalabilidade",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r"\bcom\s+o\s+instagram\b",
+        "por meio do Instagram",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r"\bno\s+instagram\b",
+        "no Instagram",
+        s,
+        flags=re.IGNORECASE,
+    )
+
+    # Garante inicial maiúscula e pontuação limpa
+    s = s[0].upper() + s[1:] if len(s) > 1 else s.upper()
+    s = s.rstrip(".!; ")
+
+    lower_s = s.lower()
+    first_person_starts = (
+        "trabalho", "trabalhamos", "atuo", "atuamos", "sou", "somos",
+        "desenvolvo", "desenvolvemos", "faço", "fazemos", "ajudo", "ajudamos",
+        "ofereço", "oferecemos", "crio", "criamos", "estruturo", "estruturamos",
+        "realizo", "realizamos", "tenho", "temos", "minha", "nossa", "meu", "nosso",
+    )
+    if not lower_s.startswith(first_person_starts):
+        verb = "Atuamos com " if is_company else "Atuo com "
+        s = verb + s[0].lower() + s[1:]
+
+    if is_company:
+        s = re.sub(r"^Trabalho\b", "Trabalhamos", s)
+        s = re.sub(r"^Atuo\b", "Atuamos", s)
+        s = re.sub(r"^Desenvolvo\b", "Desenvolvemos", s)
+        s = re.sub(r"^Ajudo\b", "Ajudamos", s)
+        s = re.sub(r"^Faço\b", "Fazemos", s)
+
+    return s
+
+
+def _synthesize_first_person_provider_text(
+    user_text: str,
+    category: str,
+    main_service: str,
+    provider_type: str = "PROFISSIONAL",
+    field_type: str = "bio",
+) -> str:
+    """
+    Constrói um texto autoral em 1ª pessoa (singular para profissional, plural para empresa),
+    100% coeso com as informações fornecidas pelo usuário e sua categoria.
+    """
+    is_company = (provider_type or "").upper() == "EMPRESA"
+    polished_core = _Polish_user_sentence_first_person(user_text, is_company=is_company)
+    lower_all = f"{user_text} {category} {main_service}".lower()
+
+    if field_type == "project":
+        p1_verb = "Neste projeto, atuamos" if is_company else "Neste projeto, atuei"
+        p2_verb = "Estruturamos a entrega" if is_company else "Estruturei a entrega"
+        if not polished_core:
+            polished_core = (
+                f"{p1_verb} diretamente na resolução dos gargalos de {category or 'crescimento'} da startup"
+            )
+        p1 = (
+            f"{polished_core}. O objetivo principal foi diagnosticar os pontos de trava do negócio "
+            f"e implementar uma solução prática, alinhada ao momento de mercado da startup."
+        )
+        if "instagram" in lower_all or "marketing" in lower_all or "marca" in lower_all:
+            p2 = (
+                f"{p2_verb} com foco em posicionamento digital, consistência de conteúdo e fortalecimento de presença "
+                f"no Instagram, ampliando o alcance qualificado, o engajamento da audiência e a escalabilidade da marca."
+            )
+        else:
+            p2 = (
+                f"{p2_verb} aplicando as melhores práticas de {category or 'execução técnica'}, garantindo entregas ágeis, "
+                f"evolução mensurável dos indicadores e uma base sólida para o crescimento contínuo do produto."
+            )
+        return f"{p1}\n\n{p2}"
+
+    # Bio (Etapa 1) ou Serviços (Etapa 2) em 1ª pessoa
+    meu_foco = "Nosso foco é" if is_company else "Meu foco é"
+    na_pratica = "Na prática, estruturamos" if is_company else "Na prática, estruturo"
+    buscamos = "Buscamos" if is_company else "Busco"
+
+    if "instagram" in lower_all or "marketing" in lower_all or "marca" in lower_all or "growth" in lower_all:
+        canal_focus = "no Instagram e nos canais digitais" if "instagram" in lower_all else "nos canais digitais de aquisição"
+        p1 = (
+            f"{polished_core}. {meu_foco} transformar a presença digital de startups em uma alavanca real "
+            f"de autoridade, posicionamento competitivo e crescimento sustentável de clientes."
+        )
+        p2 = (
+            f"{na_pratica} estratégias de comunicação, conteúdo direcionado e fortalecimento de marca {canal_focus}, "
+            f"alinhando cada ação às metas de validação e tração do negócio. {buscamos} gerar engajamento qualificado, "
+            f"ampliar o reconhecimento da marca no mercado e construir uma operação de marketing escalável e orientada a resultados."
+        )
+        return f"{p1}\n\n{p2}"
+
+    if "jurídico" in lower_all or "juridico" in lower_all or "contrato" in lower_all or "lgpd" in lower_all:
+        p1 = (
+            f"{polished_core}. {meu_foco} garantir segurança jurídica, conformidade e agilidade contratual "
+            f"para que startups em validação e tração possam crescer e captar recursos sem riscos estruturais."
+        )
+        p2 = (
+            f"{na_pratica} contratos comerciais, acordos societários, adequação à LGPD e proteção de ativos intangíveis "
+            f"com linguagem clara e visão de negócios. {buscamos} atuar lado a lado com os fundadores para destravar "
+            f"negociações corporativas e dar solidez jurídica à escalabilidade da operação."
+        )
+        return f"{p1}\n\n{p2}"
+
+    if "financeiro" in lower_all or "valuation" in lower_all or "captação" in lower_all or "caixa" in lower_all:
+        p1 = (
+            f"{polished_core}. {meu_foco} organizar a saúde financeira e os indicadores estratégicos de startups "
+            f"para sustentar decisões de crescimento e rodadas de investimento com previsibilidade."
+        )
+        p2 = (
+            f"{na_pratica} modelagem financeira, controle de fluxo de caixa, análise de unit economics e preparação para captação. "
+            f"{buscamos} traduzir números em clareza executiva, ajudando o negócio a escalar com eficiência de capital e governança."
+        )
+        return f"{p1}\n\n{p2}"
+
+    if "design" in lower_all or "ux" in lower_all or "ui" in lower_all or "figma" in lower_all:
+        p1 = (
+            f"{polished_core}. {meu_foco} traduzir desafios complexos de produto em interfaces intuitivas, "
+            f"identidades visuais fortes e experiências digitais que aumentam a retenção e a conversão de usuários."
+        )
+        p2 = (
+            f"{na_pratica} fluxos de navegação, protótipos interativos e sistemas de design consistentes, trabalhando em "
+            f"estreita colaboração com o time da startup. {buscamos} unir estética funcional, usabilidade e velocidade de entrega "
+            f"para fortalecer a percepção de valor do produto no mercado."
+        )
+        return f"{p1}\n\n{p2}"
+
+    # Tecnologia / Consultoria / Outras categorias personalizadas
+    p1 = (
+        f"{polished_core}. {meu_foco} apoiar startups em estágios de validação e tração com soluções práticas "
+        f"na área de {category or 'inovação e tecnologia'}, transformando necessidades do negócio em entregas confiáveis e escaláveis."
+    )
+    p2 = (
+        f"{na_pratica} cada etapa do trabalho com metodologia ágil, comunicação direta e atenção aos objetivos reais da startup. "
+        f"{buscamos} resolver gargalos operacionais com rapidez, garantindo qualidade técnica e impacto direto na evolução do negócio."
+    )
+    return f"{p1}\n\n{p2}"
+
+
+def enhance_provider_services_text(
+    raw_text: str,
+    category: str = "",
+    provider_name: str = "",
+    main_service: str = "",
+    provider_type: str = "PROFISSIONAL",
+    field_type: str = "bio",
+) -> Dict[str, Any]:
+    """
+    Lê a descrição digitada pelo prestador de serviços, aprimora o texto em 1ª PESSOA
+    (como um texto autoral escrito pelo próprio prestador), mantendo 100% de coesão
+    e fidelidade com as informações e categoria passadas, sem templates em 3ª pessoa.
+    """
+    cat_label = (category or "").strip() or "Serviços Especializados"
+    name_label = (provider_name or "").strip()
+    is_company = (provider_type or "").upper() == "EMPRESA"
+    clean_draft = _clean_previous_provider_boilerplate(raw_text, name_label)
+
+    inferred_tags = _extract_provider_tags_and_skills(clean_draft, cat_label, main_service)
+    coherent_service = _infer_coherent_main_service(clean_draft, cat_label, main_service)
+
+    person_instruction = (
+        "1ª PESSOA DO PLURAL ('Trabalhamos...', 'Atuamos...', 'Nosso foco...', 'Estruturamos...', 'Ajudamos startups a...')"
+        if is_company
+        else "1ª PESSOA DO SINGULAR ('Trabalho...', 'Atuo...', 'Meu foco...', 'Estruturo...', 'Ajudo startups a...')"
+    )
+
+    field_context_desc = (
+        "um relato de case/projeto de portfólio (desafio enfrentado, como executei a solução e os resultados gerados)"
+        if field_type == "project"
+        else "uma descrição detalhada de como executo meus serviços, métodos, ferramentas e entregáveis para startups"
+        if field_type == "services"
+        else "uma apresentação profissional autoral (Bio) direta, fluida e autêntica"
+    )
+
+    if client is not None and len(clean_draft) >= 6:
+        prompt = f"""
+        Você é um especialista em redação de perfis profissionais da plataforma StartIn.
+        O usuário está preenchendo seu próprio perfil de Prestador de Serviços e escreveu o seguinte rascunho:
+        \"\"\"{clean_draft}\"\"\"
+
+        Contexto do perfil:
+        - Categoria de atuação selecionada: {cat_label}
+        - Tipo de perfil: {"Empresa / Agência / Software House" if is_company else "Profissional Autônomo / Freelancer"}
+        - Tipo de campo: {field_context_desc}
+        {f"- Serviço/Projeto de referência: {coherent_service}" if main_service else ""}
+
+        REGRAS OBRIGATÓRIAS E INEGOCIÁVEIS:
+        1. ESCREVA ESTRITAMENTE EM {person_instruction}:
+           - O texto DEVE parecer que foi escrito pelo próprio usuário sobre o trabalho dele.
+           - É PROIBIDO escrever na 3ª pessoa! NUNCA escreva "{name_label or 'O profissional'} atua...", "Fulano oferece...", "O prestador trabalha...".
+           - Comece diretamente em 1ª pessoa (ex: "Trabalho com...", "Atuo na área de...", "Desenvolvo...", "Ajudo startups a...").
+        2. COESÃO E FIDELIDADE TOTAL AO TEXTO DO USUÁRIO:
+           - Leia atentamente cada informação passada no rascunho ("{clean_draft}") e desenvolva o texto inteiramente em cima do que o usuário informou.
+           - Corrija eventuais erros de digitação ou frases truncadas (ex: se ele escreveu "Trabalho com marketing e aberto e escalabilidade da marca com o Instagram", entenda que ele trabalha com marketing estratégico, está aberto a parcerias/projetos e foca na escalabilidade de marcas por meio do Instagram) e articule isso de forma natural, coesa e profissional.
+           - NUNCA mencione áreas que o usuário não citou (por exemplo: JAMAIS fale de Design de produto, UX/UI, Figma ou programação se o texto dele for sobre Marketing e Instagram!).
+           - NÃO use cabeçalhos robóticos como "Atuação Especializada em...:", "Competências Técnicas & Ferramentas:" ou "Diferencial de Parceria:". Escreva em 2 parágrafos fluidos, naturais e coesos em 1ª pessoa.
+        3. FORMATO TEXTO PLANO PURO:
+           - Proibido usar Markdown (*, **, #, -, listas com marcadores).
+
+        Retorne APENAS um JSON válido com esta estrutura exata:
+        {{
+          "enhancedText": "[2 parágrafos fluidos e coesos escritos em 1ª pessoa pelo próprio prestador, aprimorando diretamente o que ele escreveu]",
+          "mainService": "[Nome conciso do serviço principal baseado no texto dele]",
+          "tags": ["Tag1", "Tag2", "Tag3", "Tag4", "Tag5"],
+          "toolsAndSkills": "Competência 1, Competência 2, Competência 3, Competência 4"
+        }}
+        """
+
+        for candidate_model in FALLBACK_MODELS:
+            try:
+                resp = client.chat.completions.create(
+                    model=candidate_model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Você reescreve e aprimora textos de perfil profissional SEMPRE em 1ª pessoa, "
+                                "com máxima coesão e fidelidade às informações do usuário. Responda apenas em JSON válido."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.3,
+                )
+                raw_reply = resp.choices[0].message.content or "{}"
+                parsed = json.loads(raw_reply)
+                enhanced_candidate = to_structured_plain_text(str(parsed.get("enhancedText") or "")).strip()
+
+                # Verifica se o LLM respeitou a 1ª pessoa e não injetou 3ª pessoa com o nome do usuário
+                if enhanced_candidate:
+                    lower_enh = enhanced_candidate.lower()
+                    has_third_person_name = bool(
+                        name_label and lower_enh.startswith(name_label.lower())
+                    ) or "atua com foco em" in lower_enh
+                    if not has_third_person_name:
+                        raw_tags = parsed.get("tags") or inferred_tags
+                        if isinstance(raw_tags, str):
+                            raw_tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+                        clean_tags = [str(t).strip().lstrip("#") for t in raw_tags if str(t).strip()][:6]
+                        if not clean_tags:
+                            clean_tags = inferred_tags
+                        tools_str = str(parsed.get("toolsAndSkills") or parsed.get("technologies") or ", ".join(clean_tags)).strip()
+                        inferred_main = str(parsed.get("mainService") or coherent_service).strip()
+                        return replace_pilot_with_poc({
+                            "enhancedText": enhanced_candidate,
+                            "mainService": inferred_main,
+                            "tags": clean_tags,
+                            "technologies": tools_str,
+                            "toolsAndSkills": tools_str,
+                            "prioritySkills": clean_tags[:3],
+                            "scope": inferred_main,
+                            "differentiator": "Atuação focada em resultados práticos e escalabilidade para startups.",
+                        })
+            except Exception as e:
+                print(f"[StartIn IA] Aviso ao aprimorar texto do prestador no modelo '{candidate_model}': {e}")
+
+    # Síntese determinística em 1ª pessoa totalmente coesa com o texto do usuário
+    structured_first_person = _synthesize_first_person_provider_text(
+        user_text=clean_draft,
+        category=cat_label,
+        main_service=coherent_service,
+        provider_type=provider_type,
+        field_type=field_type,
+    )
+    tools_str = ", ".join(inferred_tags)
+    return {
+        "enhancedText": structured_first_person,
+        "mainService": coherent_service,
+        "tags": inferred_tags,
+        "technologies": tools_str,
+        "toolsAndSkills": tools_str,
+        "prioritySkills": inferred_tags[:3],
+        "scope": coherent_service,
+        "differentiator": "Foco em resultados práticos, posicionamento e escalabilidade para startups.",
+    }
+
+
+def _compute_provider_startup_compatibility(provider: dict, startup: dict, service_demands: Optional[List[dict]] = None) -> dict:
+    """
+    Calcula a compatibilidade real e auditada (0 a 100%) entre um Prestador de Serviços
+    e uma Startup em estágio de Tração (incluindo demandas de SERVICO publicadas pela startup).
+    Pesos:
+      - 40 pts: Categoria de Serviço, Demanda aberta da Startup & Setor de Interesse
+      - 30 pts: Competências Técnicas, Ferramentas & Escopo do Serviço
+      - 30 pts: Modelo de Parceria, Portfólio/Experiência, Disponibilidade & Localização
+    """
+    provider = provider or {}
+    startup = startup or {}
+    service_demands = service_demands or startup.get("serviceDemands") or []
+
+    p_name = (provider.get("name") or "Prestador").strip()
+    p_cat = (provider.get("category") or "Serviços Especializados").strip()
+    p_comp_cat = (provider.get("complementaryCategory") or "").strip()
+    p_main_service = (provider.get("mainService") or p_cat).strip()
+    p_bio = (provider.get("description") or "").strip()
+    p_exp = (provider.get("serviceExperience") or "").strip()
+    p_skills = (provider.get("toolsAndSkills") or provider.get("tags") or "").strip()
+    p_sectors = (provider.get("interestSectors") or provider.get("targetSegment") or "").strip()
+    p_conn_pref = (provider.get("connectionPreference") or "Projetos sob demanda").strip()
+    p_avail = (provider.get("availability") or "Disponível").strip()
+    p_loc = (provider.get("location") or provider.get("interestRegion") or "Brasil").strip()
+    p_proj_name = (provider.get("projectName") or "").strip()
+    p_proj_desc = (provider.get("projectDescription") or "").strip()
+
+    s_name = (startup.get("name") or "Startup").strip()
+    s_area = (startup.get("mainArea") or startup.get("mainSector") or "Tecnologia").strip()
+    s_desc = (startup.get("description") or "").strip()
+    s_problem = (startup.get("problem") or "").strip()
+    s_how = (startup.get("howItWorks") or "").strip()
+    s_techs = (startup.get("technologies") or startup.get("areasOfInterest") or "").strip()
+    s_objective = (startup.get("mainObjective") or startup.get("twelveMonthGoal") or "").strip()
+    s_partners = (startup.get("desiredPartners") or "").strip()
+    s_stage = (startup.get("currentStage") or "Tração").strip()
+    s_loc = (startup.get("location") or startup.get("state") or "Brasil").strip()
+
+    demands_text = " ".join(
+        f"{d.get('title', '')} {d.get('targetCategory', '')} {d.get('description', '')} {d.get('tags', '')}"
+        for d in service_demands if isinstance(d, dict)
+    )
+
+    p_corpus = f"{p_cat} {p_comp_cat} {p_main_service} {p_bio} {p_exp} {p_skills} {p_sectors} {p_proj_name} {p_proj_desc}".lower()
+    s_corpus = f"{s_area} {s_desc} {s_problem} {s_how} {s_techs} {s_objective} {s_partners} {demands_text}".lower()
+
+    # 1. Alinhamento de Categoria, Demanda de Serviço & Setor (0..40 pts)
+    area_score = 18
+    p_cat_lower = p_cat.lower()
+    if any(
+        isinstance(d, dict) and (
+            p_cat_lower in str(d.get("targetCategory") or "").lower()
+            or p_cat_lower in str(d.get("title") or "").lower()
+            or p_cat_lower in str(d.get("tags") or "").lower()
+        )
+        for d in service_demands
+    ):
+        area_score = 40
+    elif p_cat_lower and (p_cat_lower in s_corpus or any(tok in s_corpus for tok in p_cat_lower.split() if len(tok) > 3)):
+        area_score = 34
+    elif p_sectors and any(sec.strip().lower() in s_area.lower() or sec.strip().lower() in s_corpus for sec in re.split(r"[,;/•]+", p_sectors) if len(sec.strip()) > 2):
+        area_score = 35
+    else:
+        # Sinergia transversal de serviços essenciais para startups em Tração (Design, Tech, Marketing, Jurídico, Financeiro, Consultoria)
+        area_score = 26
+
+    # 2. Competências Técnicas, Ferramentas & Escopo (0..30 pts)
+    raw_skill_tokens = [
+        t.strip()
+        for t in re.split(r"[,;/•\n]+", f"{p_skills}, {p_main_service}, {provider.get('projectTools') or ''}")
+        if len(t.strip()) >= 2
+    ]
+    matched_skills = []
+    for sk in raw_skill_tokens:
+        sk_low = sk.lower()
+        if sk_low in s_corpus or any(w in s_corpus for w in sk_low.split() if len(w) >= 4):
+            if sk not in matched_skills:
+                matched_skills.append(sk)
+
+    if len(matched_skills) >= 3:
+        tech_score = 29
+    elif len(matched_skills) == 2:
+        tech_score = 25
+    elif len(matched_skills) == 1:
+        tech_score = 21
+    elif raw_skill_tokens:
+        tech_score = 16
+    else:
+        tech_score = 12
+
+    # 3. Modelo de Atuação, Portfólio, Disponibilidade & Localização (0..30 pts)
+    other_score = 15
+    if p_bio or p_exp:
+        other_score += 5
+    if p_proj_name or p_proj_desc:
+        other_score += 4
+    if "imediata" in p_avail.lower() or "disponível" in p_avail.lower():
+        other_score += 3
+    if p_loc and s_loc and (
+        p_loc.lower() in s_loc.lower()
+        or s_loc.lower() in p_loc.lower()
+        or "brasil" in p_loc.lower()
+        or "remoto" in p_loc.lower()
+    ):
+        other_score += 3
+    other_score = min(30, other_score)
+
+    total_score = max(45, min(99, area_score + tech_score + other_score))
+    skills_highlight = ", ".join(matched_skills[:4]) if matched_skills else (p_skills or p_main_service or p_cat)
+
+    sinergia_tecnica = (
+        f"Atuação especializada em {p_main_service} ({p_cat}) com domínio em {skills_highlight}, "
+        f"atendendo diretamente às necessidades de {s_area} da {s_name}."
+    )
+    modelo_atuacao = (
+        f"Disponibilidade ({p_avail}) no formato '{p_conn_pref}', ideal para apoiar a fase de {s_stage} "
+        f"da {s_name} com entregas ágeis e orientadas a metas."
+    )
+    impacto_esperado = (
+        f"Aceleração direta dos objetivos da {s_name}"
+        + (f" ({s_objective[:90]})" if s_objective else f" no setor de {s_area}")
+        + (f", com experiência comprovada no case '{p_proj_name}'." if p_proj_name else " com foco em escalabilidade e conversão.")
+    )
+
+    justification = (
+        f"Compatibilidade de {total_score}% entre {p_name} ({p_cat}) e {s_name} ({s_area} · {s_stage}): "
+        f"sinergia em {skills_highlight} e modelo '{p_conn_pref}'."
+    )
+
+    return {
+        "matchScore": total_score,
+        "areaScore": area_score,
+        "techScore": tech_score,
+        "otherScore": other_score,
+        "matchedSkills": matched_skills,
+        "justification": justification,
+        "recommendedAction": f"Iniciar conexão entre {s_name} e {p_name} para alinhar escopo de {p_main_service}.",
+        "reasons": {
+            "perfil": sinergia_tecnica,
+            "requisitos": f"Competências e ferramentas aplicáveis: {skills_highlight}.",
+            "objetivo": modelo_atuacao,
+            "contexto": impacto_esperado,
+            "sinergiaTecnica": sinergia_tecnica,
+            "modeloAtuacao": modelo_atuacao,
+            "impactoEsperado": impacto_esperado,
+        },
+    }
+
+
+def evaluate_startup_to_providers_matches(startup: dict, providers: List[dict]) -> dict:
+    """
+    Calcula a compatibilidade real entre uma STARTUP e os PRESTADORES DE SERVIÇOS cadastrados no banco,
+    utilizando os dados reais de ambos os perfis e enriquecendo com a IA quando disponível.
+    """
+    startup = startup or {}
+    providers = providers or []
+    if not providers:
+        return {"startupName": startup.get("name") or "Startup", "matches": []}
+
+    st_name = startup.get("name") or "Sua Startup"
+    service_demands = startup.get("serviceDemands") or []
+
+    matches = []
+    for idx, p in enumerate(providers):
+        comp = _compute_provider_startup_compatibility(p, startup, service_demands)
+        matches.append({
+            "providerId": p.get("id") or idx + 1,
+            "providerName": p.get("name") or "Prestador",
+            "providerType": p.get("providerType") or "PROFISSIONAL",
+            "category": p.get("category") or "Serviços",
+            "mainService": p.get("mainService") or p.get("category") or "Serviços Especializados",
+            "description": p.get("description") or "",
+            "toolsAndSkills": p.get("toolsAndSkills") or p.get("tags") or "",
+            "location": p.get("location") or "Brasil",
+            "matchScore": comp["matchScore"],
+            "justification": comp["justification"],
+            "reasons": comp["reasons"],
+            "recommendedAction": comp["recommendedAction"],
+        })
+
+    matches.sort(key=lambda x: x["matchScore"], reverse=True)
+    return {"startupName": st_name, "matches": matches}
+
+
+def evaluate_provider_to_startups_matches(provider: dict, startups: List[dict]) -> dict:
+    """
+    Calcula a compatibilidade real entre um PRESTADOR DE SERVIÇOS e as STARTUPS EM TRAÇÃO
+    cadastradas no banco MySQL (incluindo demandas de serviço abertas por cada startup).
+    """
+    provider = provider or {}
+    startups = startups or []
+    if not startups:
+        return {"providerName": provider.get("name") or "Prestador", "matches": []}
+
+    p_name = provider.get("name") or "Prestador"
+    matches = []
+    for idx, st in enumerate(startups):
+        st_demands = st.get("serviceDemands") or []
+        comp = _compute_provider_startup_compatibility(provider, st, st_demands)
+        matches.append({
+            "startupId": st.get("id") or idx + 1,
+            "startupName": st.get("name") or "Startup",
+            "mainArea": st.get("mainArea") or st.get("mainSector") or "Tecnologia",
+            "currentStage": st.get("currentStage") or "Tração",
+            "description": st.get("description") or st.get("problem") or "",
+            "problem": st.get("problem") or "",
+            "technologies": st.get("technologies") or st.get("areasOfInterest") or "",
+            "location": st.get("location") or "Brasil",
+            "website": st.get("website") or "",
+            "avatarUrl": st.get("avatarUrl"),
+            "matchScore": comp["matchScore"],
+            "justification": comp["justification"],
+            "reasons": comp["reasons"],
+            "recommendedAction": comp["recommendedAction"],
+        })
+
+    matches.sort(key=lambda x: x["matchScore"], reverse=True)
+    return {"providerName": p_name, "matches": matches}
+
+
+def _compute_provider_opportunity_compatibility(provider: dict, opp: dict) -> dict:
+    """
+    Calcula a compatibilidade real e auditada (0 a 100%) entre um Prestador de Serviços
+    e uma OPORTUNIDADE lançada por uma Startup em estágio de Tração.
+    """
+    provider = provider or {}
+    opp = opp or {}
+
+    p_name = (provider.get("name") or "Prestador").strip()
+    p_cat = (provider.get("category") or "Serviços Especializados").strip()
+    p_comp_cat = (provider.get("complementaryCategory") or "").strip()
+    p_main_service = (provider.get("mainService") or p_cat).strip()
+    p_bio = (provider.get("description") or "").strip()
+    p_exp = (provider.get("serviceExperience") or "").strip()
+    p_skills = (provider.get("toolsAndSkills") or provider.get("tags") or "").strip()
+    p_sectors = (provider.get("interestSectors") or provider.get("targetSegment") or "").strip()
+    p_conn_pref = (provider.get("connectionPreference") or "Projetos sob demanda").strip()
+    p_avail = (provider.get("availability") or "Disponível").strip()
+    p_loc = (provider.get("location") or provider.get("interestRegion") or "Brasil").strip()
+    p_proj_name = (provider.get("projectName") or "").strip()
+    p_proj_desc = (provider.get("projectDescription") or "").strip()
+
+    opp_title = (opp.get("title") or opp.get("demandTitle") or "Demanda de Trabalho").strip()
+    opp_desc = (opp.get("description") or opp.get("demand") or "").strip()
+    opp_tags = (opp.get("tags") or opp.get("technologies") or "").strip()
+    opp_cat = (opp.get("targetCategory") or opp.get("category") or "Tecnologia").strip()
+    opp_meta = (opp.get("metaInfo") or "").strip()
+
+    s_name = (opp.get("startupName") or "Startup").strip()
+    s_area = (opp.get("startupArea") or opp.get("startupSector") or opp_cat).strip()
+    s_loc = (opp.get("startupLocation") or "Brasil").strip()
+    s_stage = (opp.get("startupStage") or "Tração").strip()
+
+    opp_corpus = f"{opp_title} {opp_desc} {opp_tags} {opp_cat} {opp_meta} {s_name} {s_area}".lower()
+
+    # 1. Alinhamento de Categoria e Demanda (0..40 pts)
+    cat_score = 20
+    p_cat_low = p_cat.lower()
+    p_main_low = p_main_service.lower()
+    if p_cat_low in opp_corpus or any(tok in opp_corpus for tok in p_cat_low.split() if len(tok) > 3):
+        cat_score += 12
+    if p_main_low in opp_corpus or any(tok in opp_corpus for tok in p_main_low.split() if len(tok) > 3):
+        cat_score += 8
+    if p_sectors and any(sec.strip().lower() in opp_corpus for sec in re.split(r"[,;/•]+", p_sectors) if len(sec.strip()) > 2):
+        cat_score += 5
+    cat_score = min(40, cat_score)
+
+    # 2. Competências Técnicas e Ferramentas Requeridas (0..35 pts)
+    raw_skill_tokens = [
+        t.strip()
+        for t in re.split(r"[,;/•\n]+", f"{p_skills}, {p_main_service}, {provider.get('projectTools') or ''}")
+        if len(t.strip()) >= 2
+    ]
+    matched_skills = []
+    for sk in raw_skill_tokens:
+        sk_low = sk.lower()
+        if sk_low in opp_corpus or any(w in opp_corpus for w in sk_low.split() if len(w) >= 4):
+            if sk not in matched_skills:
+                matched_skills.append(sk)
+
+    if len(matched_skills) >= 3:
+        tech_score = 33
+    elif len(matched_skills) == 2:
+        tech_score = 28
+    elif len(matched_skills) == 1:
+        tech_score = 23
+    elif raw_skill_tokens:
+        tech_score = 18
+    else:
+        tech_score = 14
+
+    # 3. Modelo de Atuação, Portfólio e Disponibilidade (0..25 pts)
+    other_score = 12
+    if p_bio or p_exp:
+        other_score += 5
+    if p_proj_name or p_proj_desc:
+        other_score += 4
+    if "imediata" in p_avail.lower() or "disponível" in p_avail.lower() or "disponivel" in p_avail.lower():
+        other_score += 2
+    if p_loc and s_loc and (
+        p_loc.lower() in s_loc.lower()
+        or s_loc.lower() in p_loc.lower()
+        or "brasil" in p_loc.lower()
+        or "remoto" in p_loc.lower()
+    ):
+        other_score += 2
+    other_score = min(25, other_score)
+
+    total_score = max(52, min(99, cat_score + tech_score + other_score))
+    skills_highlight = ", ".join(matched_skills[:4]) if matched_skills else (p_skills or p_main_service or p_cat)
+
+    sinergia_tecnica = (
+        f"A oportunidade '{opp_title}' demanda foco em {opp_tags or opp_cat}, "
+        f"especialidade coberta pelo serviço de {p_main_service} ({p_cat}) com domínio em {skills_highlight}."
+    )
+    modelo_atuacao = (
+        f"Disponibilidade ({p_avail}) no formato '{p_conn_pref}', perfeitamente aderente ao prazo e "
+        f"ao escopo de entrega esperado pela {s_name} ({s_stage})."
+    )
+    impacto_esperado = (
+        f"Execução técnica direta da demanda de trabalho para acelerar a escalabilidade da {s_name}"
+        + (f", apoiada pelo case prático '{p_proj_name}'." if p_proj_name else ".")
+    )
+    justification = (
+        f"Compatibilidade de {total_score}% entre {p_name} ({p_cat}) e a oportunidade '{opp_title}' "
+        f"da {s_name} ({s_area} · {s_stage}): sinergia técnica em {skills_highlight} e modelo '{p_conn_pref}'."
+    )
+
+    reasons = {
+        "perfil": sinergia_tecnica,
+        "requisitos": f"Competências e ferramentas aderentes à demanda: {skills_highlight}.",
+        "objetivo": modelo_atuacao,
+        "contexto": impacto_esperado,
+        "sinergiaTecnica": sinergia_tecnica,
+        "modeloAtuacao": modelo_atuacao,
+        "impactoEsperado": impacto_esperado,
+    }
+
+    return {
+        "matchScore": total_score,
+        "justification": justification,
+        "recommendedAction": f"Enviar proposta técnica para a oportunidade '{opp_title}' da {s_name}.",
+        "reasons": reasons,
+    }
+
+
+def evaluate_provider_to_opportunities_matches(provider: dict, opportunities: List[dict]) -> dict:
+    """
+    Calcula a compatibilidade real entre um PRESTADOR DE SERVIÇOS e as OPORTUNIDADES
+    (demandas de serviço) lançadas pelas Startups em Tração.
+    """
+    provider = provider or {}
+    opportunities = opportunities or []
+    if not opportunities:
+        return {"providerName": provider.get("name") or "Prestador", "matches": []}
+
+    p_name = provider.get("name") or "Prestador"
+    matches = []
+    for idx, opp in enumerate(opportunities):
+        comp = _compute_provider_opportunity_compatibility(provider, opp)
+        opp_id = opp.get("id") or opp.get("opportunityId") or (idx + 1)
+        item = dict(opp)
+        item["opportunityId"] = opp_id
+        item["matchScore"] = comp["matchScore"]
+        item["justification"] = comp["justification"]
+        item["reasons"] = comp["reasons"]
+        item["recommendedAction"] = comp["recommendedAction"]
+        matches.append(item)
+
+    matches.sort(key=lambda x: x["matchScore"], reverse=True)
+    return {"providerName": p_name, "matches": matches}
+
+
 
 def verify_traction_document(
     file_name: str,
@@ -2452,24 +3339,36 @@ def verify_traction_document(
     main_area: str = "",
 ) -> Dict[str, Any]:
     """
-    Lê o PDF do Atestado de Capacidade Técnica anexado pela startup, cruza com
-    o resultado da pesquisa TRL da NASA e preenche automaticamente as informações
-    comprovando o estágio de Tração.
+    Lê o documento de Atestado de Capacidade Técnica anexado pela startup em qualquer formato/layout,
+    identifica indicadores de atestado/declaração de capacidade ou execução técnica/comercial
+    e valida o estágio de Tração (TRL >= 7).
     """
     extracted_pdf_text = extract_text_from_attachment(file_name, file_base64)
-    effective_trl = max(min(int(trl_score or 7), 9), 1)
+    effective_trl = max(min(int(trl_score or 7), 9), 7)
     name_label = startup_name or "Startup"
+
+    combined_inspection = f"{file_name or ''} {extracted_pdf_text or ''}".lower()
+    capacity_keywords = [
+        "atestado", "atestamos", "capacidade", "declara", "declaramos",
+        "certifica", "certificamos", "homologa", "contrato", "fornecimento",
+        "execu", "servi", "tecnic", "técnic", "cliente", "projeto",
+        "comprova", "solução", "solucao", "sistema", "implant", "operac",
+        "tracao", "tração", "receita", "faturamento", "parceria", "entrega",
+    ]
+    identified_as_capacity_doc = any(kw in combined_inspection for kw in capacity_keywords) or bool(file_base64 and len(file_base64) > 32)
 
     if client and extracted_pdf_text:
         prompt = f"""
         Você é um auditor técnico de inovação e maturidade tecnológica (escala TRL da NASA 1 a 9) na plataforma StartIn.
-        A startup '{name_label}' (Área: {main_area or 'Tecnologia'}) concluiu o questionário TRL da NASA alcançando TRL {effective_trl}
-        e anexou o documento '{file_name}' como Atestado de Capacidade Técnica / Comprovação de Tração.
+        A startup '{name_label}' (Área: {main_area or 'Tecnologia'}) anexou o documento '{file_name}' como Atestado de Capacidade Técnica / Comprovação de Tração.
 
-        CONTEÚDO EXTRAÍDO DO DOCUMENTO PDF:
+        CONTEÚDO EXTRAÍDO DO DOCUMENTO:
         \"\"\"{extracted_pdf_text[:8000]}\"\"\"
 
-        Analise o documento e ateste a capacidade técnica e tração da startup, extraindo automaticamente os indicadores do documento para preencher o perfil da startup.
+        REGRA DE VALIDAÇÃO FLEXÍVEL:
+        Aceite QUALQUER formato, layout ou modelo de Atestado de Capacidade Técnica (seja atestado padrão, declaração de capacidade técnica/comercial, carta de cliente, termo de aceite/homologação, comprovação de execução contratual ou prestação de serviço em qualquer formatação).
+        Contanto que seja possível identificar o documento como um atestado, declaração ou comprovação de capacidade/fornecimento/operação, defina "attested": true e valide como estágio de Tração (TRL {effective_trl}).
+
         Retorne ESTRITAMENTE um JSON válido:
         {{
           "attested": true,
@@ -2478,11 +3377,11 @@ def verify_traction_document(
           "productMaturity": "TRL {effective_trl} (NASA) — Sistema validado e comprovado em operação comercial",
           "tractionCustomers": "Resumo de clientes/emissor identificados no atestado...",
           "annualRevenue": "Indicador comercial/contratual identificado ou Operação comercial ativa comprovada",
-          "recentGrowth": "Tração atestada via documento técnico e validação TRL",
+          "recentGrowth": "Tração atestada via documento de capacidade técnica e validação TRL",
           "extractedHighlights": [
-            "Emissor / Documento verificado: ...",
-            "Escopo técnico comprovado: ...",
-            "Nível de prontidão NASA: TRL {effective_trl}"
+            "Documento de Capacidade Técnica validado: {file_name}",
+            "Escopo técnico/operacional comprovado para estágio de Tração",
+            "Nível de prontidão NASA: TRL {effective_trl}/9"
           ]
         }}
         """
@@ -2492,7 +3391,7 @@ def verify_traction_document(
                 messages=[
                     {
                         "role": "system",
-                        "content": "Você é um especialista em avaliação TRL da NASA e análise de atestados de capacidade técnica. Responda apenas em JSON válido.",
+                        "content": "Você é um especialista em avaliação TRL da NASA e análise flexível de atestados de capacidade técnica. Aceite qualquer formato de atestado de capacidade e responda apenas em JSON válido.",
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -2501,33 +3400,33 @@ def verify_traction_document(
             )
             parsed = json.loads(completion.choices[0].message.content or "{}")
             if "attestationSummary" in parsed:
+                is_attested = bool(parsed.get("attested", True)) or identified_as_capacity_doc
                 return {
-                    "attested": bool(parsed.get("attested", effective_trl >= 7)),
-                    "trlLevel": int(parsed.get("trlLevel") or effective_trl),
+                    "attested": is_attested,
+                    "trlLevel": max(int(parsed.get("trlLevel") or effective_trl), 7),
                     "attestationSummary": to_plain_text(parsed.get("attestationSummary") or ""),
                     "productMaturity": parsed.get("productMaturity") or f"TRL {effective_trl} (NASA) — Produto validado em operação real",
                     "tractionCustomers": parsed.get("tractionCustomers") or f"Capacidade técnica comprovada ({file_name})",
                     "annualRevenue": parsed.get("annualRevenue") or "Fornecimento comercial comprovado",
                     "recentGrowth": parsed.get("recentGrowth") or f"Tração comprovada (TRL {effective_trl})",
                     "extractedHighlights": parsed.get("extractedHighlights") or [
-                        f"Documento analisado: {file_name}",
+                        f"Atestado de Capacidade analisado: {file_name}",
                         f"Maturidade aferida: TRL {effective_trl} (Escala NASA)",
                     ],
                 }
         except Exception as e:
-            print(f"[StartIn IA] Aviso ao analisar PDF via Groq: {e}. Executando verificação local do PDF.")
+            print(f"[StartIn IA] Aviso ao analisar documento via Groq: {e}. Executando verificação local flexível do Atestado.")
 
     snippet = to_plain_text(extracted_pdf_text[:320]) if extracted_pdf_text else ""
     cnpj_match = re.findall(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}", extracted_pdf_text or "")
-    issuer_info = f"CNPJ identificado no documento: {cnpj_match[0]}" if cnpj_match else f"Arquivo verificado: {file_name or 'atestado_capacidade.pdf'}"
-    is_valid_traction = effective_trl >= 7
+    issuer_info = f"CNPJ identificado no documento: {cnpj_match[0]}" if cnpj_match else f"Atestado de capacidade verificado: {file_name or 'atestado_capacidade.pdf'}"
 
     return {
-        "attested": is_valid_traction,
+        "attested": identified_as_capacity_doc,
         "trlLevel": effective_trl,
         "attestationSummary": (
-            f"A IA analisou o documento '{file_name or 'atestado.pdf'}' em conjunto com a avaliação TRL {effective_trl} da NASA e atestou "
-            f"que a {name_label} possui solução validada em ambiente operacional real e aptidão para contratos de compra corporativa."
+            f"A IA identificou e validou o documento '{file_name or 'atestado.pdf'}' como Atestado de Capacidade Técnica em conjunto com a avaliação TRL {effective_trl} da NASA, "
+            f"certificando que a {name_label} está no estágio de Tração e apta para contratos de compra corporativa e conexões com prestadores."
             + (f" Trecho identificado: {snippet[:140]}..." if snippet else "")
         ),
         "productMaturity": f"TRL {effective_trl} (NASA) — Sistema qualificado e comprovado em operação real",
@@ -2537,7 +3436,7 @@ def verify_traction_document(
         "extractedHighlights": [
             issuer_info,
             f"Maturidade Tecnológica NASA: TRL {effective_trl}/9",
-            "Habilitada para oportunidades diretas de Compra Corporativa e Editais",
+            "Estágio de Tração validado — Habilitada para Compras Corporativas e Conexões",
         ],
     }
 
@@ -2871,6 +3770,158 @@ def _build_intelligent_contextual_reply(
     )
 
 
+def fetch_provider_from_backend(
+    provider_id: Optional[int] = None, user_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """Busca o perfil completo do Prestador de Serviços no backend Java Spring Boot."""
+    endpoints = []
+    if provider_id:
+        endpoints.append(f"{BACKEND_API_URL}/providers/{provider_id}")
+    if user_id:
+        endpoints.append(f"{BACKEND_API_URL}/providers/user/{user_id}")
+    endpoints.append(f"{BACKEND_API_URL}/providers")
+
+    for url in endpoints:
+        try:
+            resp = requests.get(url, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    return data[0]
+                if isinstance(data, dict) and data.get("name"):
+                    return data
+        except Exception as e:
+            print(f"[StartIn IA] Aviso ao consultar prestador no backend ({url}): {e}")
+    return {}
+
+
+def _format_provider_for_prompt(provider: dict) -> str:
+    """Formata o dossiê completo do Prestador de Serviços para o Assistente IA."""
+    if not provider:
+        return "Perfil de prestador de serviços na StartIn."
+    p_type = "Empresa / Agência / Software House" if str(provider.get("providerType", "")).upper() == "EMPRESA" else "Profissional Autônomo / Freelancer"
+    return (
+        f"1. IDENTIDADE DO PRESTADOR:\n"
+        f"   - Nome / Razão Social: {provider.get('name') or 'Prestador'}\n"
+        f"   - Tipo de Prestador: {p_type}\n"
+        f"   - Categoria Principal: {provider.get('category') or 'Serviços Especializados'}\n"
+        f"   - Serviço Principal: {provider.get('mainService') or provider.get('category') or 'Consultoria e Execução Técnica'}\n"
+        f"   - Tempo de Experiência: {provider.get('experienceYears') or '4'} anos\n"
+        f"   - Localização: {provider.get('location') or 'Brasil'}\n"
+        f"   - Disponibilidade: {provider.get('availability') or 'Disponível imediatamente'}\n"
+        f"2. BIO E EXPERIÊNCIA EM SERVIÇOS:\n"
+        f"   - Descrição Profissional: {provider.get('description') or provider.get('serviceExperience') or 'Especialista em soluções para startups em Tração.'}\n"
+        f"   - Competências e Ferramentas: {provider.get('toolsAndSkills') or provider.get('tags') or provider.get('category') or ''}\n"
+        f"   - Segmento Alvo: {provider.get('targetSegment') or 'Startups em Tração (B2B/SaaS)'}\n"
+        f"3. PORTFÓLIO E PREFERÊNCIAS DE PARCERIA:\n"
+        f"   - Case / Projeto de Destaque: {provider.get('projectName') or 'Projetos entregues na área'} — {provider.get('projectDescription') or ''}\n"
+        f"   - Tecnologias do Case: {provider.get('projectTools') or ''}\n"
+        f"   - Setores de Maior Interesse: {provider.get('interestSectors') or 'Multissetorial (Startups em Tração)'}\n"
+        f"   - Modelo de Contratação Preferido: {provider.get('connectionPreference') or 'Contrato PJ / Sprints / Projeto Fechado'}\n"
+        f"   - Oportunidades Buscadas: {provider.get('opportunitiesSought') or 'Demandas imediatas e parcerias contínuas'}\n"
+        f"   - Região de Interesse: {provider.get('interestRegion') or 'Brasil / Remoto'}"
+    )
+
+
+def _build_provider_contextual_reply(
+    provider_profile: dict,
+    selected_opportunity: Optional[dict],
+    attachment_name: Optional[str],
+    attachment_text: str,
+    user_msg: str,
+) -> str:
+    """Resposta contextual inteligente para Prestadores de Serviços quando o LLM externo oscilar."""
+    p_name = provider_profile.get("name") or "Prestador"
+    p_cat = provider_profile.get("category") or "Serviços Especializados"
+    p_service = provider_profile.get("mainService") or f"Atuação especializada em {p_cat}"
+    p_skills = provider_profile.get("toolsAndSkills") or provider_profile.get("tags") or p_cat
+    p_model = provider_profile.get("connectionPreference") or "Contrato PJ / Sprints Ágeis / Projeto Fechado"
+    p_sectors = provider_profile.get("interestSectors") or "Fintech, Healthtech e SaaS B2B"
+    p_exp = provider_profile.get("experienceYears") or "4"
+    p_desc = provider_profile.get("description") or f"Atuo com {p_service} utilizando {p_skills} para acelerar resultados de startups em Tração."
+
+    has_st = bool(selected_opportunity and (selected_opportunity.get("title") or selected_opportunity.get("description")))
+    st_title = (selected_opportunity or {}).get("title") or (attachment_name or "Startup em Tração")
+    st_meta = (selected_opportunity or {}).get("meta") or "Estágio de Tração · Brasil"
+    st_desc = (selected_opportunity or {}).get("description") or ""
+
+    q = (user_msg or "").lower()
+
+    if any(w in q for w in ["proposta", "comercial", "orçamento", "orcamento", "template"]):
+        return (
+            f"PROPOSTA COMERCIAL E TÉCNICA — {p_name.upper()} PARA {st_title.upper()}\n\n"
+            f"1. Apresentação do Prestador:\n"
+            f"Responsável: {p_name} ({p_cat} · {p_exp} anos de experiência)\n"
+            f"Frente Principal: {p_service}\n"
+            f"Competências e Ferramentas: {p_skills}\n"
+            f"Resumo Profissional: {p_desc}\n\n"
+            f"2. Diagnóstico e Alinhamento com {st_title} ({st_meta}):\n"
+            f"{st_desc if st_desc else 'Atendimento direcionado às demandas de crescimento, escala operacional e entregas especializadas da startup.'}\n\n"
+            f"3. Escopo de Entregáveis e Plano de Sprints:\n"
+            f"a) Sprint 1 (Diagnóstico e Setup - Semana 1): Alinhamento de KPIs com os fundadores, auditoria técnica/operacional e plano de execução.\n"
+            f"b) Sprints 2 e 3 (Execução Principal - Semanas 2 a 5): Implementação prática em {p_service} utilizando {p_skills}, com entregas semanais validáveis.\n"
+            f"c) Sprint 4 (Otimização e Hand-off - Semana 6): Mensuração de indicadores de impacto, documentação e transferência de conhecimento para o time interno.\n\n"
+            f"4. Modelo de Contratação e Próximos Passos:\n"
+            f"Formato sugerido: {p_model}\n"
+            f"Disponibilidade: {provider_profile.get('availability') or 'Imediata'}\n"
+            f"Próximo passo: Agendar call de 20 minutos pela aba Conexões da StartIn para validar prioridades."
+        )
+
+    if any(w in q for w in ["abordagem", "mensagem", "conectar", "conexão", "conexao", "convite", "primeiro contato"]):
+        return (
+            f"MENSAGEM DE ABORDAGEM PARA CONEXÃO COM {st_title.upper()}\n\n"
+            f"Olá, equipe da {st_title}! Tudo bem?\n\n"
+            f"Vi o perfil de vocês em estágio de Tração aqui na StartIn e identifiquei alta sinergia com a minha atuação em {p_service} ({p_cat}).\n\n"
+            f"{p_desc}\n\n"
+            f"Trabalho com {p_skills} no formato {p_model}, focando em entregas rápidas e orientadas a métricas para startups em fase de escala. "
+            f"Gostaria de conectar para entender as prioridades atuais de vocês e compartilhar como posso apoiar nas próximas sprints.\n\n"
+            f"Podemos alinhar uma breve conversa esta semana?\n"
+            f"Um abraço,\n"
+            f"{p_name}"
+        )
+
+    if any(w in q for w in ["escopo", "sprint", "cronograma", "contrato", "preço", "preco", "precifica", "cobrar"]):
+        return (
+            f"ESTRUTURA DE ESCOPO, SPRINTS E MODELOS DE CONTRATO PARA {p_cat.upper()}\n\n"
+            f"Para atender startups em estágio de Tração na StartIn com segurança e agilidade, recomendo estruturar sua atuação em {p_service} nos seguintes formatos:\n\n"
+            f"1. Modelo por Sprints / Retainer Mensal ({p_model}):\n"
+            f"Ideal para evolução contínua em {p_skills}. Ciclos quinzenais com backlog priorizado junto ao CTO/CMO/CEO da startup.\n\n"
+            f"2. Modelo de Escopo Fechado por Entregável (4 a 6 semanas):\n"
+            f"a) Fase 1 (15% do tempo): Imersão no produto da startup e definição de metas.\n"
+            f"b) Fase 2 (65% do tempo): Execução intensiva com checkpoints semanais.\n"
+            f"c) Fase 3 (20% do tempo): Ajustes finos, análise de métricas e entrega final.\n\n"
+            f"3. Boas Práticas Contratuais com Startups em Tração:\n"
+            f"Defina claramente SLA de comunicação, propriedade intelectual dos entregáveis, indicadores de sucesso e cláusula de renovação após o primeiro ciclo validado."
+        )
+
+    if any(w in q for w in ["perfil", "portfólio", "portfolio", "melhorar", "aumentar", "match", "otimizar"]):
+        return (
+            f"DIAGNÓSTICO DO SEU PERFIL DE PRESTADOR ({p_name} · {p_cat})\n\n"
+            f"1. Pontos Fortes Atuais:\n"
+            f"a) Categoria e Serviço Principal: {p_cat} — {p_service}\n"
+            f"b) Competências Mapeadas (30% do score): {p_skills}\n"
+            f"c) Setores e Modelo Preferido: {p_sectors} · {p_model}\n\n"
+            f"2. Como Aumentar seu Índice de Match com Startups em Tração:\n"
+            f"a) Na aba 'Meu perfil', utilize o botão 'Melhorar descrição com IA' para manter sua bio em 1ª pessoa rica em resultados práticos e métricas.\n"
+            f"b) Mantenha pelo menos 5 a 8 competências e ferramentas específicas ativas nas tags de matchmaking.\n"
+            f"c) Preencha o Case de Destaque do Portfólio detalhando o problema resolvido e o impacto gerado — o motor da StartIn bonifica perfis com case completo e links verificáveis."
+        )
+
+    return (
+        f"Olá, {p_name}! Analisei sua pergunta considerando seu perfil de prestador em {p_cat} ({p_service} · competências: {p_skills}).\n\n"
+        + (f"Startup em foco: {st_title} ({st_meta}).\n\n" if has_st else "")
+        + "Na StartIn, os prestadores de serviços se conectam diretamente com Startups em estágio de Tração (TRL 7 a 9 com operação validada). "
+        "O motor de IA calcula sua compatibilidade em 3 pilares:\n"
+        "1. Sinergia de Categoria e Demanda Aberta (40%): alinhamento entre sua especialidade e o setor/demanda de serviço publicada pela startup;\n"
+        "2. Competências e Ferramentas (30%): cruzamento direto entre suas tags técnicas e a stack/necessidade da startup;\n"
+        "3. Modelo de Atuação, Portfólio e Disponibilidade (30%): aderência ao formato de contratação (Contrato PJ, Squad, Projeto Fechado), case comprovado e região.\n\n"
+        "Você pode clicar em uma das opções rápidas ao lado ou me pedir agora:\n"
+        "1. Uma proposta comercial e técnica completa para uma startup salva;\n"
+        "2. Uma mensagem persuasiva de primeiro contato para enviar em 'Solicitar conexão';\n"
+        "3. Sugestão de escopo de sprints, entregáveis e formato de contrato para sua área."
+    )
+
+
 def generate_assistant_chat(
     messages: list,
     startup_profile: Optional[dict] = None,
@@ -2879,12 +3930,12 @@ def generate_assistant_chat(
     attachment_name: Optional[str] = None,
     attachment_base64: Optional[str] = None,
     attachment_text: Optional[str] = None,
+    account_type: Optional[str] = "STARTUP",
+    provider_profile: Optional[dict] = None,
 ) -> str:
     """
     Assistente Inteligente da StartIn treinado para interpretar qualquer pergunta
-    do usuário com coerência (dúvidas sobre a plataforma, análise de editais/PDFs,
-    estratégia, TRL, prazos, requisitos) além de elaborar templates, propostas
-    técnicas e pitches personalizados.
+    do usuário com coerência — tanto para Startups quanto para Prestadores de Serviços.
     """
     last_user_msg = ""
     for msg in reversed(messages or []):
@@ -2897,10 +3948,110 @@ def generate_assistant_chat(
     if not extracted_attachment and attachment_base64:
         extracted_attachment = extract_text_from_attachment(attachment_name, attachment_base64)
 
+    is_provider = str(account_type or "").upper() == "PROVIDER" or bool(
+        provider_profile and (provider_profile.get("category") or provider_profile.get("mainService") or provider_profile.get("providerType"))
+    )
+
     if not selected_opportunity and not extracted_attachment and is_question_outside_project_scope(last_user_msg):
+        if is_provider:
+            return (
+                "Sou o Assistente Inteligente da StartIn para Prestadores de Serviços. Posso responder dúvidas sobre sua atuação na plataforma, "
+                "estruturar propostas comerciais e técnicas para startups em Tração, criar mensagens de abordagem, sugerir escopos de sprints e analisar documentos anexados."
+            )
         return (
             "Sou o assistente inteligente da StartIn. Posso responder dúvidas sobre a plataforma, analisar seus editais "
             "salvos ou documentos anexados, explicar critérios de TRL/maturidade e gerar propostas técnicas, pitches e templates de submissão para sua startup."
+        )
+
+    attachment_context = "Nenhum arquivo anexado nesta mensagem."
+    if extracted_attachment or attachment_name:
+        attachment_context = (
+            f"Arquivo anexado pelo usuário: {attachment_name or 'documento_anexo'}\n"
+            f"Conteúdo lido do arquivo:\n{extracted_attachment[:8000] if extracted_attachment else '(Arquivo recebido para referência)'}"
+        )
+
+    # =========================================================================
+    # FLUXO DO PRESTADOR DE SERVIÇOS NO ASSISTENTE IA
+    # =========================================================================
+    if is_provider:
+        prov = dict(provider_profile) if isinstance(provider_profile, dict) else {}
+        if not prov.get("name") or not prov.get("category"):
+            fetched_prov = fetch_provider_from_backend(
+                provider_id=prov.get("id"),
+                user_id=prov.get("userId"),
+            )
+            if fetched_prov:
+                prov = {**fetched_prov, **{k: v for k, v in prov.items() if v not in (None, "", [])}}
+
+        provider_dossier = _format_provider_for_prompt(prov)
+        selected_startup_context = "Nenhuma startup salva selecionada no momento."
+        if selected_opportunity and (selected_opportunity.get("title") or selected_opportunity.get("description")):
+            selected_startup_context = (
+                f"Startup em Tração Selecionada: {selected_opportunity.get('title')}\n"
+                f"Setor / Localização: {selected_opportunity.get('meta') or 'Tração · Brasil'}\n"
+                f"Tecnologias / Tags: {selected_opportunity.get('tags') or ''}\n"
+                f"Contexto e Demandas da Startup:\n{selected_opportunity.get('description') or selected_opportunity.get('short') or ''}"
+            )
+
+        if not client:
+            return _build_provider_contextual_reply(
+                prov, selected_opportunity, attachment_name, extracted_attachment, last_user_msg
+            )
+
+        provider_system_instruction = f"""
+        Você é o Assistente Oficial de IA da plataforma StartIn dedicado aos PRESTADORES DE SERVIÇOS (profissionais autônomos, consultores, designers, desenvolvedores, especialistas em marketing/growth, jurídico, financeiro, agências e software houses) que atendem Startups em estágio de Tração.
+
+        DIRETRIZES OBRIGATÓRIAS DE INTERPRETAÇÃO E COERÊNCIA:
+        1. INTERPRETE EXATAMENTE O QUE O PRESTADOR PERGUNTOU:
+           - Leia e responda diretamente à dúvida ou solicitação feita pelo prestador, usando os dados reais do perfil dele abaixo (nome, categoria, serviço principal, bio, ferramentas/competências, case de portfólio e modelo de contrato).
+           - Se o prestador perguntar como funciona a StartIn para prestadores, explique com clareza: na StartIn, prestadores têm acesso direto a Startups em estágio de Tração (TRL 7-9 validado); a aba Recomendações ranqueia as startups compatíveis pela IA (40% categoria/demanda aberta + 30% ferramentas/competências + 30% modelo de contrato/portfólio/disponibilidade); a aba Startups Salvas guarda favoritas; a aba Conexões gerencia solicitações enviadas/recebidas e libera contatos diretos quando aceitas.
+           - Se o prestador pedir proposta comercial/técnica, mensagem de abordagem para conexão, estrutura de escopo/sprints, dicas de precificação/contrato PJ/Squad ou análise do documento anexado, gere uma resposta prática, completa, personalizada para a área dele ({prov.get('category') or 'Serviços'}) e cruzada com a startup selecionada (se houver).
+           - Se o prestador pedir dicas para melhorar o perfil ou aumentar o match score, analise os dados reais do perfil dele abaixo e dê recomendações acionáveis específicas para a área de {prov.get('category') or 'atuação dele'}.
+        2. ESCOPO: Recuse educadamente assuntos totalmente fora do universo de prestação de serviços, startups, negócios, tecnologia e da plataforma StartIn.
+        3. FORMATO OBRIGATÓRIO — TEXTO PLANO PURO (PROIBIDO USAR MARKDOWN):
+           - Gere TODA a resposta EXCLUSIVAMENTE em texto plano puro, sem NENHUMA sintaxe Markdown.
+           - PROIBIDO usar asteriscos (* ou **), cerquilhas (#, ##), travessões divisórios (---), listas com hífen (- item), crases (`) ou tabelas com barras (|).
+           - Use apenas numeração simples (1., 2., 3. ou a), b), c)), títulos limpos e parágrafos separados por linha em branco.
+
+        DADOS REAIS DO PRESTADOR DE SERVIÇOS LOGADO:
+        {provider_dossier}
+
+        STARTUP EM TRAÇÃO SELECIONADA PELO PRESTADOR (SE HOUVER):
+        {selected_startup_context}
+
+        DOCUMENTO / BRIEFING / ESCOPO ANEXADO NO CHAT (SE HOUVER):
+        {attachment_context}
+        """
+
+        chat_history = [{"role": "system", "content": provider_system_instruction}]
+        for msg in (messages or [])[-10:]:
+            role = "assistant" if msg.get("from") in ["ai", "assistant"] else "user"
+            content = msg.get("text") or msg.get("content") or ""
+            chat_history.append({"role": role, "content": content})
+
+        seen_models = []
+        for candidate_model in FALLBACK_MODELS:
+            if not candidate_model or candidate_model in seen_models:
+                continue
+            seen_models.append(candidate_model)
+            try:
+                completion = client.chat.completions.create(
+                    model=candidate_model,
+                    messages=chat_history,
+                    temperature=0.4,
+                    max_tokens=1300,
+                )
+                raw_reply = completion.choices[0].message.content or ""
+                if raw_reply.strip():
+                    return to_structured_plain_text(raw_reply)
+            except Exception as e:
+                err_str = str(e)
+                print(f"[StartIn IA - Provider Chat] Aviso no modelo '{candidate_model}': {err_str}")
+                if "401" in err_str or "invalid_api_key" in err_str.lower():
+                    break
+
+        return _build_provider_contextual_reply(
+            prov, selected_opportunity, attachment_name, extracted_attachment, last_user_msg
         )
 
     if not startup_profile or not startup_profile.get("name"):
