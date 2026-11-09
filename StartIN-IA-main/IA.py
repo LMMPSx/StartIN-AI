@@ -258,32 +258,41 @@ def filter_opportunities_by_stage(opportunities: List[dict], stage: Optional[str
 
 
 OFF_TOPIC_KEYWORDS = [
-    "receita de", "bolo", "futebol", " escalação", "campeonato", "clima", "previsão do tempo",
-    "piada", "horóscopo", "signo", "filme", "série", "novela", "música", "letra de",
-    "quem descobriu", "capital da", "capital do", "presidente do", "política", "eleição",
-    "jogo de", " traduza ", "poema", "poesia", "história do mundo", "segunda guerra",
-    "fórmula de bhaskara", " derivada ", " integral ", "código em c++", "script python para",
+    "receita de", "bolo", "lasanha", "pizza", "culinária", "culinaria",
+    "futebol", "escalação", "escalacao", "campeonato", "copa do mundo", "brasileirão",
+    "clima", "previsão do tempo", "previsao do tempo", "vai chover",
+    "piada", "horóscopo", "horoscopo", "signo", "astrologia",
+    "filme", "série", "serie", "novela", "música", "musica", "letra de",
+    "quem descobriu", "capital da", "capital do", "presidente do", "política partidária", "eleição",
+    "jogo de", "traduza", "poema", "poesia", "história do mundo", "segunda guerra",
+    "fórmula de bhaskara", "formula de bhaskara", "derivada", "integral",
+    "código em c++", "script python para", "fofoca", "celebridade", "religião",
 ]
 
 PROJECT_KEYWORDS = [
-    "startin", "startup", "oportunidade", "oportunidades", "edital", "editais",
-    "evento", "eventos", "poc", "pocs", "compra", "compras", "match", "matches",
-    "aderência", "compatibilidade", "perfil", "fapesp", "finep", "inova", "inovação",
-    "fomento", "subvenção", "investimento", "empresa", "cliente", "clientes",
-    "dashboard", "configurações", "conta", "onboarding", "preferências", "aplicação",
-    "plataforma", "projeto", "sistema", "banco", "buscar", "priorizar", "analisar",
-    "olá", "oi", "bom dia", "boa tarde", "boa noite", "ajuda", "como funciona",
+    "startin", "startup", "startups", "oportunidade", "oportunidades", "edital", "editais",
+    "evento", "eventos", "poc", "pocs", "compra", "compras", "match", "matches", "matchmaking",
+    "aderência", "aderencia", "compatibilidade", "perfil", "fapesp", "finep", "inova", "inovação", "inovacao",
+    "fomento", "subvenção", "subvencao", "investimento", "empresa", "empresas", "cliente", "clientes",
+    "prestador", "prestadores", "serviço", "servico", "demanda", "demandas", "conexão", "conexao",
+    "proposta", "propostas", "template", "templates", "plano de trabalho", "pitch", "trl", "nasa",
+    "atestado", "validação", "validacao", "tração", "tracao", "sprints", "escopo", "contrato", "cnpj",
+    "dashboard", "configurações", "configuracoes", "conta", "onboarding", "preferências", "preferencias",
+    "aplicação", "aplicacao", "plataforma", "projeto", "sistema", "salvos", "recomendações", "recomendacoes",
+    "buscar", "priorizar", "analisar", "documento", "anexo", "pdf", "docx", "prazo", "requisitos",
+    "olá", "ola", "oi", "bom dia", "boa tarde", "boa noite", "ajuda", "como funciona", "padrão", "padrao",
 ]
 
 
 def is_question_outside_project_scope(user_text: str) -> bool:
     """
-    Identifica rapidamente se a mensagem do usuário trata de assuntos gerais
-    fora do escopo do projeto StartIn.
+    Identifica se a mensagem do usuário trata de assuntos fora do escopo
+    da plataforma StartIn, do perfil do usuário ou das oportunidades/demandas.
     """
     if not user_text or not user_text.strip():
         return False
-    lowered = f" {user_text.lower().strip()} "
+    clean_text = re.sub(r"\[Arquivo anexado:.*?\]", "", user_text, flags=re.IGNORECASE).strip()
+    lowered = f" {clean_text.lower().strip()} "
     if any(kw in lowered for kw in OFF_TOPIC_KEYWORDS) and not any(pk in lowered for pk in PROJECT_KEYWORDS):
         return True
     return False
@@ -302,11 +311,12 @@ def fetch_user_and_startup_from_backend(
     e todas as informações completas do perfil da startup para realizar o match.
     """
     endpoints = []
-    if startup_id:
-        endpoints.append(f"{BACKEND_API_URL}/startups/{startup_id}")
     if user_id:
         endpoints.append(f"{BACKEND_API_URL}/startups/user/{user_id}")
-    endpoints.append(f"{BACKEND_API_URL}/startups/default")
+    if startup_id:
+        endpoints.append(f"{BACKEND_API_URL}/startups/{startup_id}")
+    if not endpoints:
+        endpoints.append(f"{BACKEND_API_URL}/startups/default")
 
     for url in endpoints:
         try:
@@ -3932,11 +3942,50 @@ def generate_assistant_chat(
     attachment_text: Optional[str] = None,
     account_type: Optional[str] = "STARTUP",
     provider_profile: Optional[dict] = None,
+    company_profile: Optional[dict] = None,
+    template_style: Optional[str] = None,
 ) -> str:
     """
     Assistente Inteligente da StartIn treinado para interpretar qualquer pergunta
-    do usuário com coerência — tanto para Startups quanto para Prestadores de Serviços.
+    do usuário com coerência — para Startups, Empresas e Prestadores de Serviços,
+    com suporte a Definição de Template personalizado ou 'padrão'.
     """
+    raw_style = (template_style or "").strip()
+    is_default_style = (not raw_style) or raw_style.lower() in ("padrão", "padrao", "default", "normal")
+    template_directive = (
+        "O usuário escolheu o estilo de template 'padrão': gere os templates na estrutura oficial da StartIn."
+        if is_default_style
+        else f"ESTILO DE TEMPLATE DEFINIDO PELO USUÁRIO: '{raw_style}'. Adapte e estruture o template/documento de forma 100% COESA seguindo exatamente o formato, seções e estilo '{raw_style}' solicitado pelo usuário (ou lembre-o de que ele pode digitar 'padrão' caso queira o modelo tradicional da IA)."
+    )
+
+    def _apply_style_wrapper(base_text: str) -> str:
+        if is_default_style:
+            return base_text
+        upper_base = (base_text or "").upper()
+        is_template_doc = any(
+            marker in upper_base
+            for marker in (
+                "TEMPLATE DE",
+                "PROPOSTA COMERCIAL",
+                "PROPOSTA TÉCNICA",
+                "PROPOSTA TECNICA",
+                "PLANO DE TRABALHO",
+                "TEXTO DE MÉRITO",
+                "TEXTO DE MERITO",
+                "MENSAGEM DE ABORDAGEM",
+                "ASSUNTO:",
+                "TERMO DE REFERÊNCIA",
+                "ROTEIRO DE AVALIAÇÃO",
+            )
+        )
+        if not is_template_doc:
+            return base_text
+        return (
+            f"ESTILO DE TEMPLATE APLICADO: {raw_style.upper()}\n\n"
+            f"{base_text}\n\n"
+            f"Nota de Formatação: Documento estruturado com coesão segundo o modelo '{raw_style}'. "
+            f"Você pode exportar este conteúdo em PDF ou DOCX nos botões abaixo, ou digitar 'padrão' para usar o template tradicional."
+        )
     last_user_msg = ""
     for msg in reversed(messages or []):
         if msg.get("from") not in ("ai", "assistant"):
@@ -3952,15 +4001,15 @@ def generate_assistant_chat(
         provider_profile and (provider_profile.get("category") or provider_profile.get("mainService") or provider_profile.get("providerType"))
     )
 
-    if not selected_opportunity and not extracted_attachment and is_question_outside_project_scope(last_user_msg):
+    if is_question_outside_project_scope(last_user_msg):
         if is_provider:
             return (
-                "Sou o Assistente Inteligente da StartIn para Prestadores de Serviços. Posso responder dúvidas sobre sua atuação na plataforma, "
-                "estruturar propostas comerciais e técnicas para startups em Tração, criar mensagens de abordagem, sugerir escopos de sprints e analisar documentos anexados."
+                "Sou o Assistente Inteligente da StartIn para Prestadores de Serviços. Atuo exclusivamente em temas ligados à plataforma StartIn, "
+                "ao seu perfil de prestador e às oportunidades e demandas de startups em Tração (como propostas comerciais e técnicas, mensagens de abordagem, escopos de sprints e análise de documentos anexados)."
             )
         return (
-            "Sou o assistente inteligente da StartIn. Posso responder dúvidas sobre a plataforma, analisar seus editais "
-            "salvos ou documentos anexados, explicar critérios de TRL/maturidade e gerar propostas técnicas, pitches e templates de submissão para sua startup."
+            "Sou o Assistente Inteligente da StartIn. Atuo exclusivamente em temas ligados à plataforma StartIn, ao seu perfil e às oportunidades "
+            "salvas ou anexadas (editais, POCs, compras corporativas, escala TRL da NASA, propostas técnicas e geração de templates)."
         )
 
     attachment_context = "Nenhum arquivo anexado nesta mensagem."
@@ -3994,12 +4043,15 @@ def generate_assistant_chat(
             )
 
         if not client:
-            return _build_provider_contextual_reply(
+            return _apply_style_wrapper(_build_provider_contextual_reply(
                 prov, selected_opportunity, attachment_name, extracted_attachment, last_user_msg
-            )
+            ))
 
         provider_system_instruction = f"""
         Você é o Assistente Oficial de IA da plataforma StartIn dedicado aos PRESTADORES DE SERVIÇOS (profissionais autônomos, consultores, designers, desenvolvedores, especialistas em marketing/growth, jurídico, financeiro, agências e software houses) que atendem Startups em estágio de Tração.
+
+        DEFINIÇÃO DE TEMPLATE ATIVA:
+        {template_directive}
 
         DIRETRIZES OBRIGATÓRIAS DE INTERPRETAÇÃO E COERÊNCIA:
         1. INTERPRETE EXATAMENTE O QUE O PRESTADOR PERGUNTOU:
@@ -4050,9 +4102,9 @@ def generate_assistant_chat(
                 if "401" in err_str or "invalid_api_key" in err_str.lower():
                     break
 
-        return _build_provider_contextual_reply(
+        return _apply_style_wrapper(_build_provider_contextual_reply(
             prov, selected_opportunity, attachment_name, extracted_attachment, last_user_msg
-        )
+        ))
 
     if not startup_profile or not startup_profile.get("name"):
         startup_profile = fetch_user_and_startup_from_backend(
@@ -4082,12 +4134,15 @@ def generate_assistant_chat(
         )
 
     if not client:
-        return _build_intelligent_contextual_reply(
+        return _apply_style_wrapper(_build_intelligent_contextual_reply(
             startup_profile, selected_opportunity, attachment_name, extracted_attachment, last_user_msg
-        )
+        ))
 
     system_instruction = f"""
     Você é o Assistente Oficial de IA da plataforma StartIn — especialista no ecossistema StartIn, inovação aberta, editais de fomento (FAPESP PIPE, FINEP, Sebrae, InovaStartups), escala TRL da NASA (1 a 9), POCs, Primeira Compra e Compras Corporativas.
+
+    DEFINIÇÃO DE TEMPLATE ATIVA:
+    {template_directive}
 
     DIRETRIZES OBRIGATÓRIAS DE INTERPRETAÇÃO E COERÊNCIA:
     1. INTERPRETE EXATAMENTE O QUE FOI PERGUNTADO: Nunca repita uma resposta padrão ou um template de submissão se o usuário não pediu um template!
@@ -4138,9 +4193,9 @@ def generate_assistant_chat(
             if "401" in err_str or "invalid_api_key" in err_str.lower():
                 break
 
-    return _build_intelligent_contextual_reply(
+    return _apply_style_wrapper(_build_intelligent_contextual_reply(
         startup_profile, selected_opportunity, attachment_name, extracted_attachment, last_user_msg
-    )
+    ))
 
 
 if __name__ == "__main__":

@@ -42,17 +42,20 @@ _SCHEDULER_STOP_EVENT = threading.Event()
 def _daily_08am_scheduler_loop():
     """
     Thread em background que monitora o relógio do servidor e executa
-    automaticamente todos os dias às 08:00 da manhã o web scraping e
-    o cálculo de matches para todas as startups, enviando o JSON para o banco.
+    automaticamente às 08:00 da manhã:
+    - Plano PRO: RAG e sincronização diária todos os dias às 08:00 da manhã.
+    - Plano FREE: RAG e sincronização semanal (1x por semana às segundas-feiras às 08:00 da manhã).
     """
     global _LAST_EXECUTED_DATE
-    print("[StartIn IA] Agendador automático diário (08:00 da manhã) iniciado.")
+    print("[StartIn IA] Agendador automático (08:00 da manhã — PRO Diário / FREE Semanal) iniciado.")
     while not _SCHEDULER_STOP_EVENT.is_set():
         now = datetime.now()
         today_str = now.strftime("%Y-%m-%d")
         if now.hour == 8 and now.minute == 0 and _LAST_EXECUTED_DATE != today_str:
             _LAST_EXECUTED_DATE = today_str
+            is_weekly_free_day = (now.weekday() == 0)  # Segunda-feira às 08:00 inclui contas Free
             try:
+                print(f"[StartIn IA] Executando RAG das 08:00 (PRO=Diário, FREE={'Ativo hoje (Semanal)' if is_weekly_free_day else 'Aguardando ciclo semanal'})...")
                 run_daily_scrape_and_match_job(send_to_backend=True)
             except Exception as e:
                 print(f"[StartIn IA] Erro na rotina agendada das 08:00: {e}")
@@ -221,10 +224,12 @@ class ChatRequest(BaseModel):
     providerId: Optional[int] = None
     userId: Optional[int] = None
     provider: Optional[dict] = None
+    company: Optional[dict] = None
     selectedOpportunity: Optional[dict] = None
     attachmentName: Optional[str] = None
     attachmentBase64: Optional[str] = None
     attachmentText: Optional[str] = None
+    templateStyle: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -553,6 +558,8 @@ def chat_assistant_endpoint(request: ChatRequest):
         attachment_text=request.attachmentText,
         account_type=request.accountType or ("PROVIDER" if provider_dict else "STARTUP"),
         provider_profile=provider_dict if provider_dict else None,
+        company_profile=request.company if isinstance(request.company, dict) else None,
+        template_style=request.templateStyle,
     )
     return ChatResponse(reply=reply)
 
