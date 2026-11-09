@@ -26,6 +26,7 @@ from IA import (
     enhance_startup_problem_text,
     enhance_company_demands_text,
     verify_traction_document,
+    extract_provider_resume_pdf,
     scrape_real_web_opportunities,
     fetch_user_and_startup_from_backend,
     fetch_opportunities_from_backend,
@@ -266,6 +267,15 @@ class VerifyTractionRequest(BaseModel):
     trlAnswers: Optional[list] = None
     startupName: Optional[str] = ""
     mainArea: Optional[str] = ""
+
+
+class ExtractProviderResumeRequest(BaseModel):
+    fileName: str
+    fileBase64: str
+    providerName: Optional[str] = ""
+    providerType: Optional[str] = "PROFISSIONAL"
+    linkedinUrl: Optional[str] = ""
+    portfolioUrl: Optional[str] = ""
 
 
 # === Endpoints ===
@@ -526,6 +536,23 @@ def verify_traction_pdf_endpoint(request: VerifyTractionRequest):
         trl_answers=request.trlAnswers,
         startup_name=request.startupName or "",
         main_area=request.mainArea or "",
+    )
+
+
+@app.post("/api/ai/extract-provider-resume")
+def extract_provider_resume_endpoint(request: ExtractProviderResumeRequest):
+    """
+    Lê o Currículo em PDF anexado pelo Prestador de Serviços no onboarding,
+    extrai categoria, serviço principal, tecnologias, experiências e gera uma
+    descrição prévia em 1ª pessoa pronta para revisão e melhoria com IA.
+    """
+    return extract_provider_resume_pdf(
+        file_name=request.fileName,
+        file_base64=request.fileBase64,
+        provider_name=request.providerName or "",
+        provider_type=request.providerType or "PROFISSIONAL",
+        linkedin_url=request.linkedinUrl or "",
+        portfolio_url=request.portfolioUrl or "",
     )
 
 

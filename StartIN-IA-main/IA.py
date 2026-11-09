@@ -1418,19 +1418,11 @@ def compute_audited_match_breakdown(
 
 def _recompute_audit_with_llm_semantic(audit: dict, llm_semantic_raw: Any, llm_reasons: Optional[dict] = None) -> dict:
     """
-    Permite que a LLM refine apenas a afinidade semântica conceitual do problema/demanda (0 a 5 pts),
-    mantendo os pesos de Área (0..40), Tecnologias (0..30), Estágio/TRL (0..10), Modalidade/Modelo (0..10)
-    e Localização (0..5) estritamente travados na balança auditada.
+    Mantém os pesos de Área (0..40), Tecnologias (0..30), Estágio/TRL (0..10), Modalidade/Modelo (0..10),
+    Afinidade Semântica (0..5) e Localização (0..5) estritamente travados na balança auditada determinística,
+    garantindo que o score seja 100% simétrico e idêntico em todas as telas e perfis.
     """
     updated = dict(audit)
-    det_sem = updated["problemSemanticScore"]
-    if llm_semantic_raw is not None:
-        try:
-            llm_sem = max(0, min(5, int(round(float(llm_semantic_raw)))))
-            blended_sem = max(0, min(5, int(round((det_sem + llm_sem) / 2.0))))
-            updated["problemSemanticScore"] = blended_sem
-        except (ValueError, TypeError):
-            pass
 
     updated["otherScore"] = (
         updated["stageTrlScore"]
@@ -2970,28 +2962,12 @@ def _compute_provider_startup_compatibility(provider: dict, startup: dict, servi
     """
     Calcula a compatibilidade real e auditada (0 a 100%) entre um Prestador de Serviços
     e uma Startup em estágio de Tração (incluindo demandas de SERVICO publicadas pela startup).
-    Pesos:
-      - 40 pts: Categoria de Serviço, Demanda aberta da Startup & Setor de Interesse
-      - 30 pts: Competências Técnicas, Ferramentas & Escopo do Serviço
-      - 30 pts: Modelo de Parceria, Portfólio/Experiência, Disponibilidade & Localização
+    Utiliza exatamente a mesma fórmula unificada de `_compute_provider_opportunity_compatibility`
+    para garantir simetria matemática de 100% entre a visão da Startup e a visão do Prestador.
     """
     provider = provider or {}
     startup = startup or {}
     service_demands = service_demands or startup.get("serviceDemands") or []
-
-    p_name = (provider.get("name") or "Prestador").strip()
-    p_cat = (provider.get("category") or "Serviços Especializados").strip()
-    p_comp_cat = (provider.get("complementaryCategory") or "").strip()
-    p_main_service = (provider.get("mainService") or p_cat).strip()
-    p_bio = (provider.get("description") or "").strip()
-    p_exp = (provider.get("serviceExperience") or "").strip()
-    p_skills = (provider.get("toolsAndSkills") or provider.get("tags") or "").strip()
-    p_sectors = (provider.get("interestSectors") or provider.get("targetSegment") or "").strip()
-    p_conn_pref = (provider.get("connectionPreference") or "Projetos sob demanda").strip()
-    p_avail = (provider.get("availability") or "Disponível").strip()
-    p_loc = (provider.get("location") or provider.get("interestRegion") or "Brasil").strip()
-    p_proj_name = (provider.get("projectName") or "").strip()
-    p_proj_desc = (provider.get("projectDescription") or "").strip()
 
     s_name = (startup.get("name") or "Startup").strip()
     s_area = (startup.get("mainArea") or startup.get("mainSector") or "Tecnologia").strip()
@@ -3004,115 +2980,49 @@ def _compute_provider_startup_compatibility(provider: dict, startup: dict, servi
     s_stage = (startup.get("currentStage") or "Tração").strip()
     s_loc = (startup.get("location") or startup.get("state") or "Brasil").strip()
 
-    demands_text = " ".join(
-        f"{d.get('title', '')} {d.get('targetCategory', '')} {d.get('description', '')} {d.get('tags', '')}"
-        for d in service_demands if isinstance(d, dict)
-    )
+    candidate_opps: List[dict] = []
+    for d in service_demands:
+        if isinstance(d, dict):
+            merged_opp = dict(d)
+            merged_opp.setdefault("startupName", s_name)
+            merged_opp.setdefault("startupArea", s_area)
+            merged_opp.setdefault("startupSector", startup.get("mainSector") or s_area)
+            merged_opp.setdefault("startupLocation", s_loc)
+            merged_opp.setdefault("startupStage", s_stage)
+            merged_opp.setdefault("startupProblem", s_problem)
+            merged_opp.setdefault("startupDescription", s_desc)
+            merged_opp.setdefault("startupHowItWorks", s_how)
+            merged_opp.setdefault("startupTechnologies", s_techs)
+            merged_opp.setdefault("startupObjective", s_objective)
+            merged_opp.setdefault("startupPartners", s_partners)
+            candidate_opps.append(merged_opp)
 
-    p_corpus = f"{p_cat} {p_comp_cat} {p_main_service} {p_bio} {p_exp} {p_skills} {p_sectors} {p_proj_name} {p_proj_desc}".lower()
-    s_corpus = f"{s_area} {s_desc} {s_problem} {s_how} {s_techs} {s_objective} {s_partners} {demands_text}".lower()
+    if not candidate_opps:
+        candidate_opps.append({
+            "title": f"Demanda Técnica de {s_area or 'Inovação & Tecnologia'}",
+            "description": s_problem or s_desc or "Demanda de serviços especializados para startup em estágio de Tração.",
+            "tags": s_techs or "Inovação, Escalabilidade",
+            "targetCategory": s_area or "Tecnologia",
+            "startupName": s_name,
+            "startupArea": s_area,
+            "startupSector": startup.get("mainSector") or s_area,
+            "startupLocation": s_loc,
+            "startupStage": s_stage,
+            "startupProblem": s_problem,
+            "startupDescription": s_desc,
+            "startupHowItWorks": s_how,
+            "startupTechnologies": s_techs,
+            "startupObjective": s_objective,
+            "startupPartners": s_partners,
+        })
 
-    # 1. Alinhamento de Categoria, Demanda de Serviço & Setor (0..40 pts)
-    area_score = 18
-    p_cat_lower = p_cat.lower()
-    if any(
-        isinstance(d, dict) and (
-            p_cat_lower in str(d.get("targetCategory") or "").lower()
-            or p_cat_lower in str(d.get("title") or "").lower()
-            or p_cat_lower in str(d.get("tags") or "").lower()
-        )
-        for d in service_demands
-    ):
-        area_score = 40
-    elif p_cat_lower and (p_cat_lower in s_corpus or any(tok in s_corpus for tok in p_cat_lower.split() if len(tok) > 3)):
-        area_score = 34
-    elif p_sectors and any(sec.strip().lower() in s_area.lower() or sec.strip().lower() in s_corpus for sec in re.split(r"[,;/•]+", p_sectors) if len(sec.strip()) > 2):
-        area_score = 35
-    else:
-        # Sinergia transversal de serviços essenciais para startups em Tração (Design, Tech, Marketing, Jurídico, Financeiro, Consultoria)
-        area_score = 26
+    best_comp = None
+    for cand in candidate_opps:
+        comp = _compute_provider_opportunity_compatibility(provider, cand)
+        if best_comp is None or comp["matchScore"] > best_comp["matchScore"]:
+            best_comp = comp
 
-    # 2. Competências Técnicas, Ferramentas & Escopo (0..30 pts)
-    raw_skill_tokens = [
-        t.strip()
-        for t in re.split(r"[,;/•\n]+", f"{p_skills}, {p_main_service}, {provider.get('projectTools') or ''}")
-        if len(t.strip()) >= 2
-    ]
-    matched_skills = []
-    for sk in raw_skill_tokens:
-        sk_low = sk.lower()
-        if sk_low in s_corpus or any(w in s_corpus for w in sk_low.split() if len(w) >= 4):
-            if sk not in matched_skills:
-                matched_skills.append(sk)
-
-    if len(matched_skills) >= 3:
-        tech_score = 29
-    elif len(matched_skills) == 2:
-        tech_score = 25
-    elif len(matched_skills) == 1:
-        tech_score = 21
-    elif raw_skill_tokens:
-        tech_score = 16
-    else:
-        tech_score = 12
-
-    # 3. Modelo de Atuação, Portfólio, Disponibilidade & Localização (0..30 pts)
-    other_score = 15
-    if p_bio or p_exp:
-        other_score += 5
-    if p_proj_name or p_proj_desc:
-        other_score += 4
-    if "imediata" in p_avail.lower() or "disponível" in p_avail.lower():
-        other_score += 3
-    if p_loc and s_loc and (
-        p_loc.lower() in s_loc.lower()
-        or s_loc.lower() in p_loc.lower()
-        or "brasil" in p_loc.lower()
-        or "remoto" in p_loc.lower()
-    ):
-        other_score += 3
-    other_score = min(30, other_score)
-
-    total_score = max(45, min(99, area_score + tech_score + other_score))
-    skills_highlight = ", ".join(matched_skills[:4]) if matched_skills else (p_skills or p_main_service or p_cat)
-
-    sinergia_tecnica = (
-        f"Atuação especializada em {p_main_service} ({p_cat}) com domínio em {skills_highlight}, "
-        f"atendendo diretamente às necessidades de {s_area} da {s_name}."
-    )
-    modelo_atuacao = (
-        f"Disponibilidade ({p_avail}) no formato '{p_conn_pref}', ideal para apoiar a fase de {s_stage} "
-        f"da {s_name} com entregas ágeis e orientadas a metas."
-    )
-    impacto_esperado = (
-        f"Aceleração direta dos objetivos da {s_name}"
-        + (f" ({s_objective[:90]})" if s_objective else f" no setor de {s_area}")
-        + (f", com experiência comprovada no case '{p_proj_name}'." if p_proj_name else " com foco em escalabilidade e conversão.")
-    )
-
-    justification = (
-        f"Compatibilidade de {total_score}% entre {p_name} ({p_cat}) e {s_name} ({s_area} · {s_stage}): "
-        f"sinergia em {skills_highlight} e modelo '{p_conn_pref}'."
-    )
-
-    return {
-        "matchScore": total_score,
-        "areaScore": area_score,
-        "techScore": tech_score,
-        "otherScore": other_score,
-        "matchedSkills": matched_skills,
-        "justification": justification,
-        "recommendedAction": f"Iniciar conexão entre {s_name} e {p_name} para alinhar escopo de {p_main_service}.",
-        "reasons": {
-            "perfil": sinergia_tecnica,
-            "requisitos": f"Competências e ferramentas aplicáveis: {skills_highlight}.",
-            "objetivo": modelo_atuacao,
-            "contexto": impacto_esperado,
-            "sinergiaTecnica": sinergia_tecnica,
-            "modeloAtuacao": modelo_atuacao,
-            "impactoEsperado": impacto_esperado,
-        },
-    }
+    return best_comp
 
 
 def evaluate_startup_to_providers_matches(startup: dict, providers: List[dict]) -> dict:
@@ -3189,7 +3099,7 @@ def evaluate_provider_to_startups_matches(provider: dict, startups: List[dict]) 
 def _compute_provider_opportunity_compatibility(provider: dict, opp: dict) -> dict:
     """
     Calcula a compatibilidade real e auditada (0 a 100%) entre um Prestador de Serviços
-    e uma OPORTUNIDADE lançada por uma Startup em estágio de Tração.
+    e uma OPORTUNIDADE lançada por uma Startup em estágio de Tração (fórmula unificada 40/30/30).
     """
     provider = provider or {}
     opp = opp or {}
@@ -3218,22 +3128,33 @@ def _compute_provider_opportunity_compatibility(provider: dict, opp: dict) -> di
     s_area = (opp.get("startupArea") or opp.get("startupSector") or opp_cat).strip()
     s_loc = (opp.get("startupLocation") or "Brasil").strip()
     s_stage = (opp.get("startupStage") or "Tração").strip()
+    s_problem = (opp.get("startupProblem") or "").strip()
+    s_desc = (opp.get("startupDescription") or "").strip()
+    s_how = (opp.get("startupHowItWorks") or "").strip()
+    s_techs = (opp.get("startupTechnologies") or "").strip()
+    s_objective = (opp.get("startupObjective") or "").strip()
+    s_partners = (opp.get("startupPartners") or "").strip()
 
-    opp_corpus = f"{opp_title} {opp_desc} {opp_tags} {opp_cat} {opp_meta} {s_name} {s_area}".lower()
+    opp_corpus = (
+        f"{opp_title} {opp_desc} {opp_tags} {opp_cat} {opp_meta} "
+        f"{s_name} {s_area} {s_problem} {s_desc} {s_how} {s_techs} {s_objective} {s_partners}"
+    ).lower()
 
-    # 1. Alinhamento de Categoria e Demanda (0..40 pts)
-    cat_score = 20
+    # 1. Alinhamento de Categoria, Demanda e Setor (0..40 pts)
+    area_score = 24
     p_cat_low = p_cat.lower()
-    p_main_low = p_main_service.lower()
-    if p_cat_low in opp_corpus or any(tok in opp_corpus for tok in p_cat_low.split() if len(tok) > 3):
-        cat_score += 12
-    if p_main_low in opp_corpus or any(tok in opp_corpus for tok in p_main_low.split() if len(tok) > 3):
-        cat_score += 8
-    if p_sectors and any(sec.strip().lower() in opp_corpus for sec in re.split(r"[,;/•]+", p_sectors) if len(sec.strip()) > 2):
-        cat_score += 5
-    cat_score = min(40, cat_score)
+    if p_cat_low and (p_cat_low in opp_cat.lower() or p_cat_low in opp_title.lower() or p_cat_low in opp_tags.lower()):
+        area_score = 40
+    elif p_cat_low and (p_cat_low in opp_corpus or any(tok in opp_corpus for tok in p_cat_low.split() if len(tok) >= 4)):
+        area_score = 35
+    elif p_sectors and any(
+        sec.strip().lower() in s_area.lower() or sec.strip().lower() in opp_corpus
+        for sec in re.split(r"[,;/•]+", p_sectors)
+        if len(sec.strip()) >= 3
+    ):
+        area_score = 36
 
-    # 2. Competências Técnicas e Ferramentas Requeridas (0..35 pts)
+    # 2. Competências Técnicas e Ferramentas Requeridas (0..30 pts)
     raw_skill_tokens = [
         t.strip()
         for t in re.split(r"[,;/•\n]+", f"{p_skills}, {p_main_service}, {provider.get('projectTools') or ''}")
@@ -3247,34 +3168,34 @@ def _compute_provider_opportunity_compatibility(provider: dict, opp: dict) -> di
                 matched_skills.append(sk)
 
     if len(matched_skills) >= 3:
-        tech_score = 33
+        tech_score = 29
     elif len(matched_skills) == 2:
-        tech_score = 28
+        tech_score = 25
     elif len(matched_skills) == 1:
-        tech_score = 23
+        tech_score = 21
     elif raw_skill_tokens:
-        tech_score = 18
+        tech_score = 17
     else:
-        tech_score = 14
+        tech_score = 13
 
-    # 3. Modelo de Atuação, Portfólio e Disponibilidade (0..25 pts)
-    other_score = 12
+    # 3. Modelo de Atuação, Portfólio, Disponibilidade e Localização (0..30 pts)
+    other_score = 15
     if p_bio or p_exp:
         other_score += 5
     if p_proj_name or p_proj_desc:
         other_score += 4
     if "imediata" in p_avail.lower() or "disponível" in p_avail.lower() or "disponivel" in p_avail.lower():
-        other_score += 2
+        other_score += 3
     if p_loc and s_loc and (
         p_loc.lower() in s_loc.lower()
         or s_loc.lower() in p_loc.lower()
         or "brasil" in p_loc.lower()
         or "remoto" in p_loc.lower()
     ):
-        other_score += 2
-    other_score = min(25, other_score)
+        other_score += 3
+    other_score = min(30, other_score)
 
-    total_score = max(52, min(99, cat_score + tech_score + other_score))
+    total_score = max(48, min(99, area_score + tech_score + other_score))
     skills_highlight = ", ".join(matched_skills[:4]) if matched_skills else (p_skills or p_main_service or p_cat)
 
     sinergia_tecnica = (
@@ -3287,11 +3208,11 @@ def _compute_provider_opportunity_compatibility(provider: dict, opp: dict) -> di
     )
     impacto_esperado = (
         f"Execução técnica direta da demanda de trabalho para acelerar a escalabilidade da {s_name}"
-        + (f", apoiada pelo case prático '{p_proj_name}'." if p_proj_name else ".")
+        + (f", apoiada pelo case prático '{p_proj_name}'." if p_proj_name else " com foco em entregas ágeis.")
     )
     justification = (
-        f"Compatibilidade de {total_score}% entre {p_name} ({p_cat}) e a oportunidade '{opp_title}' "
-        f"da {s_name} ({s_area} · {s_stage}): sinergia técnica em {skills_highlight} e modelo '{p_conn_pref}'."
+        f"Compatibilidade de {total_score}% entre {p_name} ({p_cat}) e "
+        f"{s_name} ({s_area} · {s_stage}): sinergia em {skills_highlight} e modelo '{p_conn_pref}'."
     )
 
     reasons = {
@@ -3306,6 +3227,10 @@ def _compute_provider_opportunity_compatibility(provider: dict, opp: dict) -> di
 
     return {
         "matchScore": total_score,
+        "areaScore": area_score,
+        "techScore": tech_score,
+        "otherScore": other_score,
+        "matchedSkills": matched_skills,
         "justification": justification,
         "recommendedAction": f"Enviar proposta técnica para a oportunidade '{opp_title}' da {s_name}.",
         "reasons": reasons,
@@ -3447,6 +3372,334 @@ def verify_traction_document(
             issuer_info,
             f"Maturidade Tecnológica NASA: TRL {effective_trl}/9",
             "Estágio de Tração validado — Habilitada para Compras Corporativas e Conexões",
+        ],
+    }
+
+
+def extract_provider_resume_pdf(
+    file_name: str,
+    file_base64: str,
+    provider_name: str = "",
+    provider_type: str = "PROFISSIONAL",
+    linkedin_url: str = "",
+    portfolio_url: str = "",
+) -> Dict[str, Any]:
+    """
+    Lê o currículo em PDF anexado pelo Prestador de Serviços no onboarding,
+    extrai coesamente a categoria principal, serviço oferecido, tecnologias e ferramentas,
+    anos de experiência, localização, case/experiência em destaque e gera uma descrição
+    prévia em 1ª pessoa pronta para revisão e aprimoramento.
+    """
+    extracted_pdf_text = extract_text_from_attachment(file_name, file_base64)
+    clean_text = (extracted_pdf_text or "").strip()
+    is_company = (provider_type or "").upper() == "EMPRESA"
+    name_label = (provider_name or "").strip() or ("Nossa Empresa" if is_company else "Profissional")
+    combined_lower = f"{file_name or ''} {clean_text} {linkedin_url or ''} {portfolio_url or ''}".lower()
+
+    # 1. Inferência de Categoria Principal
+    cat_keywords = {
+        "Tecnologia": [
+            "desenvolvedor", "developer", "software", "engenharia", "engenheiro", "programador",
+            "fullstack", "full stack", "frontend", "front-end", "backend", "back-end",
+            "react", "node", "java", "spring", "python", "typescript", "javascript", "flutter",
+            "mobile", "aws", "docker", "devops", "cloud", "api", "sql", "mysql", "postgresql",
+            "inteligência artificial", "machine learning", "dados", "data", "arquitetura", "sistemas",
+        ],
+        "Design": [
+            "ux/ui", "ux", "ui design", "product design", "designer", "figma", "prototipagem",
+            "wireframe", "design system", "identidade visual", "usabilidade", "interação",
+            "adobe", "illustrator", "photoshop", "experiência do usuário",
+        ],
+        "Marketing": [
+            "marketing", "growth", "tráfego", "trafego", "social media", "redes sociais",
+            "instagram", "meta ads", "google ads", "copywriting", "branding", "seo",
+            "inbound", "crm", "rd station", "hubspot", "aquisição", "funil", "mídia paga",
+        ],
+        "Jurídico": [
+            "jurídico", "juridico", "advogado", "advocacia", "direito", "contratos",
+            "societário", "societario", "lgpd", "compliance", "propriedade intelectual", "oab",
+        ],
+        "Financeiro": [
+            "financeiro", "finanças", "financas", "valuation", "contabilidade", "contador",
+            "fluxo de caixa", "dre", "bpo financeiro", "controladoria", "auditoria", "captação",
+        ],
+        "Consultoria": [
+            "consultoria", "consultor", "gestão", "negócios", "estratégia", "processos",
+            "scrum", "agile", "ágil", "product manager", "po", "pm", "okr", "go-to-market",
+        ],
+    }
+
+    best_cat = "Tecnologia"
+    best_cat_hits = -1
+    for cat_name, kws in cat_keywords.items():
+        hits = sum(1 for kw in kws if kw in combined_lower)
+        if hits > best_cat_hits:
+            best_cat_hits = hits
+            best_cat = cat_name
+
+    # 2. Extração de Tecnologias, Ferramentas e Competências reais do PDF
+    explicit_tech_catalog = [
+        ("react native", "React Native"),
+        ("react", "React"),
+        ("next.js", "Next.js"),
+        ("typescript", "TypeScript"),
+        ("javascript", "JavaScript"),
+        ("node.js", "Node.js"),
+        ("nodejs", "Node.js"),
+        ("java", "Java"),
+        ("spring boot", "Spring Boot"),
+        ("python", "Python"),
+        ("fastapi", "FastAPI"),
+        ("django", "Django"),
+        ("flutter", "Flutter"),
+        ("kotlin", "Kotlin"),
+        ("swift", "Swift"),
+        ("aws", "AWS"),
+        ("docker", "Docker"),
+        ("kubernetes", "Kubernetes"),
+        ("ci/cd", "CI/CD"),
+        ("postgresql", "PostgreSQL"),
+        ("mysql", "MySQL"),
+        ("mongodb", "MongoDB"),
+        ("sql", "SQL"),
+        ("git", "Git"),
+        ("tailwind", "Tailwind CSS"),
+        ("html", "HTML5 & CSS3"),
+        ("rest", "APIs REST"),
+        ("graphql", "GraphQL"),
+        ("inteligência artificial", "Inteligência Artificial"),
+        ("machine learning", "Machine Learning"),
+        ("power bi", "Power BI"),
+        ("análise de dados", "Análise de Dados"),
+        ("figma", "Figma"),
+        ("design system", "Design System"),
+        ("ux/ui", "UX/UI Design"),
+        ("prototip", "Prototipagem Interativa"),
+        ("identidade visual", "Identidade Visual"),
+        ("meta ads", "Meta Ads"),
+        ("google ads", "Google Ads"),
+        ("tráfego pago", "Tráfego Pago"),
+        ("seo", "SEO"),
+        ("copywriting", "Copywriting"),
+        ("instagram", "Instagram & Social Media"),
+        ("branding", "Branding"),
+        ("growth", "Growth Hacking"),
+        ("crm", "CRM & Automação"),
+        ("lgpd", "LGPD & Compliance"),
+        ("contratos", "Contratos & Societário"),
+        ("valuation", "Valuation & Modelagem Financeira"),
+        ("fluxo de caixa", "Gestão de Fluxo de Caixa"),
+        ("scrum", " Metodologias Ágeis (Scrum/Kanban)"),
+    ]
+
+    found_techs: List[str] = []
+    for kw, label in explicit_tech_catalog:
+        if re.search(r"\b" + re.escape(kw) + r"\b", combined_lower) or kw in combined_lower:
+            clean_lbl = label.strip()
+            if clean_lbl not in found_techs:
+                found_techs.append(clean_lbl)
+
+    domain_tags = _extract_provider_tags_and_skills(clean_text or file_name, best_cat)
+    for dt in domain_tags:
+        if dt not in found_techs and len(found_techs) < 10:
+            found_techs.append(dt)
+
+    if not found_techs:
+        found_techs = domain_tags or [best_cat, "Soluções para Startups", "Escalabilidade"]
+
+    tools_and_skills_str = ", ".join(found_techs[:8])
+    inferred_main_service = _infer_coherent_main_service(clean_text or tools_and_skills_str, best_cat)
+
+    # 3. Inferência de Anos de Experiência a partir do currículo
+    exp_years = "3–5 anos"
+    years_found = [int(y) for y in re.findall(r"\b(199\d|200\d|201\d|202[0-6])\b", clean_text)]
+    if years_found:
+        span = max(years_found) - min(years_found)
+        if span >= 8:
+            exp_years = "8+ anos"
+        elif span >= 5:
+            exp_years = "5–8 anos"
+        elif span >= 3:
+            exp_years = "3–5 anos"
+        elif span >= 1:
+            exp_years = "1–3 anos"
+
+    # 4. Inferência de Localização (Cidade, UF)
+    inferred_location = "Recife, PE"
+    known_cities = [
+        ("recife", "Recife, PE"),
+        ("são paulo", "São Paulo, SP"),
+        ("sao paulo", "São Paulo, SP"),
+        ("rio de janeiro", "Rio de Janeiro, RJ"),
+        ("belo horizonte", "Belo Horizonte, MG"),
+        ("curitiba", "Curitiba, PR"),
+        ("porto alegre", "Porto Alegre, RS"),
+        ("florianópolis", "Florianópolis, SC"),
+        ("florianopolis", "Florianópolis, SC"),
+        ("brasília", "Brasília, DF"),
+        ("brasilia", "Brasília, DF"),
+        ("salvador", "Salvador, BA"),
+        ("fortaleza", "Fortaleza, CE"),
+        ("campinas", "Campinas, SP"),
+        ("goiânia", "Goiânia, GO"),
+        ("joão pessoa", "João Pessoa, PB"),
+        ("maceió", "Maceió, AL"),
+        ("natal", "Natal, RN"),
+    ]
+    for city_kw, city_formatted in known_cities:
+        if city_kw in combined_lower:
+            inferred_location = city_formatted
+            break
+
+    # 5. Projeto / Experiência em destaque identificada no PDF
+    inferred_project_name = f"Experiência em {inferred_main_service}"
+    lines = [ln.strip() for ln in clean_text.splitlines() if len(ln.strip()) >= 8]
+    for ln in lines[:35]:
+        low_ln = ln.lower()
+        if any(k in low_ln for k in ["projeto", "experiência", "experiencia", "desenvolvedor", "designer", "consultor", "especialista", "analista", "tech lead", "fundador"]):
+            if 10 <= len(ln) <= 75:
+                inferred_project_name = to_plain_text(ln)
+                break
+
+    # 6. Uso do LLM quando disponível para extração semântica completa + descrição em 1ª pessoa
+    person_instruction = (
+        "1ª PESSOA DO PLURAL ('Atuamos...', 'Desenvolvemos...', 'Nossa experiência inclui...')"
+        if is_company
+        else "1ª PESSOA DO SINGULAR ('Atuo...', 'Desenvolvo...', 'Tenho experiência sólida em...')"
+    )
+
+    if client is not None and len(clean_text) >= 20:
+        prompt = f"""
+        Você é o motor de inteligência artificial da plataforma StartIn.
+        O prestador de serviços '{name_label}' anexou seu currículo em PDF ('{file_name}') no cadastro.
+        {f"LinkedIn informado: {linkedin_url}" if linkedin_url else ""}
+        {f"Site/Portfólio informado: {portfolio_url}" if portfolio_url else ""}
+
+        TEXTO EXTRAÍDO DO CURRÍCULO EM PDF:
+        \"\"\"{clean_text[:7500]}\"\"\"
+
+        Sua tarefa é ler atentamente o currículo e extrair os dados reais do profissional/empresa com 100% de coesão:
+        1. `category`: Escolha ESTRITAMENTE uma entre: "Tecnologia", "Design", "Marketing", "Consultoria", "Jurídico", "Financeiro".
+        2. `mainService`: O serviço principal oferecido com base na especialidade do currículo (ex: "Desenvolvimento Full Stack & Arquitetura de Software", "Product Design, UX/UI & Design System", "Marketing Estratégico, Branding & Growth").
+        3. `toolsAndSkills`: Lista separada por vírgula com as principais tecnologias, ferramentas, linguagens e competências encontradas no currículo (ex: "{tools_and_skills_str}").
+        4. `experienceYears`: Escolha entre "menos de 1 ano", "1–3 anos", "3–5 anos", "5–8 anos" ou "8+ anos".
+        5. `location`: Cidade e UF identificadas no currículo (ex: "{inferred_location}").
+        6. `projectName`: Nome conciso da principal experiência, cargo ou projeto destacado no currículo.
+        7. `description`: Crie uma descrição profissional prévia (2 parágrafos fluidos, coesos e sem markdown) escrita ESTRITAMENTE EM {person_instruction}, sintetizando as experiências profissionais, tecnologias dominadas, projetos e como pode agregar valor a startups em estágios de validação e tração. NUNCA escreva na 3ª pessoa!
+
+        Retorne APENAS um JSON válido com esta estrutura:
+        {{
+          "category": "{best_cat}",
+          "mainService": "{inferred_main_service}",
+          "toolsAndSkills": "{tools_and_skills_str}",
+          "tags": ["Tag1", "Tag2", "Tag3", "Tag4", "Tag5"],
+          "experienceYears": "{exp_years}",
+          "location": "{inferred_location}",
+          "projectName": "{inferred_project_name}",
+          "interestSectors": "Tecnologia / SaaS, IA & Dados, Finanças",
+          "description": "Texto em 1ª pessoa com 2 parágrafos sintetizando o currículo...",
+          "extractedHighlights": [
+            "Área e especialidade identificadas no currículo",
+            "Stack tecnológica e ferramentas mapeadas",
+            "Descrição profissional em 1ª pessoa gerada automaticamente"
+          ]
+        }}
+        """
+        for candidate_model in FALLBACK_MODELS:
+            try:
+                resp = client.chat.completions.create(
+                    model=candidate_model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Você analisa currículos em PDF de prestadores de serviço e extrai dados estruturados "
+                                "e uma descrição autoral em 1ª pessoa com 100% de fidelidade ao documento. Responda apenas em JSON válido."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.25,
+                )
+                parsed = json.loads(resp.choices[0].message.content or "{}")
+                desc_candidate = to_structured_plain_text(str(parsed.get("description") or "")).strip()
+                if desc_candidate:
+                    cat_out = str(parsed.get("category") or best_cat).strip()
+                    main_srv_out = str(parsed.get("mainService") or inferred_main_service).strip()
+                    skills_out = str(parsed.get("toolsAndSkills") or tools_and_skills_str).strip()
+                    raw_tags = parsed.get("tags") or found_techs[:6]
+                    if isinstance(raw_tags, str):
+                        raw_tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+                    clean_tags = [str(t).strip() for t in raw_tags if str(t).strip()][:8]
+                    return {
+                        "extracted": True,
+                        "fileName": file_name,
+                        "category": cat_out,
+                        "mainService": main_srv_out,
+                        "toolsAndSkills": skills_out,
+                        "tags": clean_tags,
+                        "experienceYears": str(parsed.get("experienceYears") or exp_years).strip(),
+                        "location": str(parsed.get("location") or inferred_location).strip(),
+                        "projectName": str(parsed.get("projectName") or inferred_project_name).strip(),
+                        "projectType": "MVP / Produto completo" if cat_out == "Tecnologia" else "Consultoria técnica",
+                        "projectYear": "2026",
+                        "interestSectors": str(parsed.get("interestSectors") or "Tecnologia / SaaS, IA & Dados, Finanças").strip(),
+                        "connectionPreference": "Projetos sob demanda",
+                        "opportunitiesSought": "Desenvolver MVPs, Prestar consultoria especializada, Atuar em projetos pontuais",
+                        "description": desc_candidate,
+                        "serviceExperience": desc_candidate,
+                        "projectDescription": desc_candidate,
+                        "extractedHighlights": parsed.get("extractedHighlights") or [
+                            f"Categoria identificada: {cat_out} ({main_srv_out})",
+                            f"Competências extraídas: {skills_out}",
+                            "Descrição profissional em 1ª pessoa gerada a partir do currículo",
+                        ],
+                    }
+            except Exception as e:
+                print(f"[StartIn IA] Aviso ao extrair currículo no modelo '{candidate_model}': {e}")
+
+    # 7. Fallback determinístico rico baseado no texto real extraído do PDF
+    verb_atuo = "Atuamos" if is_company else "Atuo"
+    verb_tenho = "Contamos com" if is_company else "Tenho"
+    verb_estruturo = "Estruturamos" if is_company else "Estruturo"
+    verb_busco = "Buscamos" if is_company else "Busco"
+
+    p1 = (
+        f"{verb_atuo} na área de {best_cat} com foco em {inferred_main_service}, aplicando "
+        f"{tools_and_skills_str} no desenvolvimento de soluções práticas e escaláveis. "
+        f"{verb_tenho} experiência consolidada ({exp_years}) conduzindo entregas técnicas, "
+        f"incluindo {inferred_project_name}, com foco em qualidade, performance e alinhamento às metas do negócio."
+    )
+    p2 = (
+        f"{verb_estruturo} cada projeto com metodologia ágil, visão orientada a produto e comunicação próxima com os fundadores. "
+        f"{verb_busco} apoiar startups em estágios de validação e tração na construção, evolução e escalabilidade de suas operações, "
+        f"transformando demandas complexas em entregáveis concretos e resultados mensuráveis."
+    )
+    synthesized_description = f"{p1}\n\n{p2}"
+
+    return {
+        "extracted": True,
+        "fileName": file_name,
+        "category": best_cat,
+        "mainService": inferred_main_service,
+        "toolsAndSkills": tools_and_skills_str,
+        "tags": found_techs[:6],
+        "experienceYears": exp_years,
+        "location": inferred_location,
+        "projectName": inferred_project_name,
+        "projectType": "MVP / Produto completo" if best_cat == "Tecnologia" else "Consultoria técnica",
+        "projectYear": "2026",
+        "interestSectors": "Tecnologia / SaaS, IA & Dados, Finanças",
+        "connectionPreference": "Projetos sob demanda",
+        "opportunitiesSought": "Desenvolver MVPs, Prestar consultoria especializada, Atuar em projetos pontuais",
+        "description": synthesized_description,
+        "serviceExperience": synthesized_description,
+        "projectDescription": synthesized_description,
+        "extractedHighlights": [
+            f"Categoria identificada no PDF: {best_cat} ({inferred_main_service})",
+            f"Tecnologias e competências mapeadas: {tools_and_skills_str}",
+            "Descrição profissional prévia em 1ª pessoa gerada automaticamente",
         ],
     }
 
