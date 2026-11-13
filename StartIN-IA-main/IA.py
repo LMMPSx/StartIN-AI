@@ -7,8 +7,8 @@ import base64
 import zipfile
 import unicodedata
 import xml.etree.ElementTree as ET
-from datetime import datetime
-from urllib.parse import urljoin
+from datetime import datetime, timedelta
+from urllib.parse import urljoin, urlparse, parse_qs, unquote
 import requests
 from bs4 import BeautifulSoup
 from groq import Groq
@@ -34,9 +34,14 @@ if os.path.exists(_ENV_FILE_PATH):
         pass
 
 # Chave da API Groq e configuração do Backend Java Spring Boot
-DEFAULT_GROQ_KEY = "Pão de queijo"
-api_key = os.environ.get("GROQ_API_KEY", DEFAULT_GROQ_KEY)
-BACKEND_API_URL = os.environ.get("BACKEND_API_URL", "http://localhost:8080/api")
+# A chave NUNCA fica no código: defina GROQ_API_KEY nas variáveis de ambiente (Vercel) ou no arquivo .env local.
+api_key = os.environ.get("GROQ_API_KEY", "").strip()
+BACKEND_API_URL = os.environ.get("BACKEND_API_URL", "http://localhost:8080/api").rstrip("/")
+if not BACKEND_API_URL.endswith("/api"):
+    BACKEND_API_URL = f"{BACKEND_API_URL}/api"
+
+# Ambiente serverless (Vercel): sistema de arquivos somente leitura, exceto /tmp
+IS_SERVERLESS = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
 
 try:
     client = Groq(api_key=api_key) if api_key else None
@@ -55,19 +60,153 @@ FALLBACK_MODELS = [
 
 # Portais reais de Editais, Chamadas Públicas e Eventos de Inovação no Brasil
 DEFAULT_PORTAL_URLS = [
+    "https://capitaai.com.br/editais-abertos/para-startup",
     "https://inovastartups.com.br/",
     "https://fapesp.br/pipe/chamadas",
     "http://www.finep.gov.br/chamadas-publicas/chamadaspublicas?situacao=aberta",
     "https://recnplay.pe/",
     "https://www.startupsummit.com.br/",
+    "https://capitaai.com.br/editais-abertos/tecnologia-e-inovacao",
+    "https://capitaai.com.br/editais-abertos/saude",
+    "https://portodigital.org/",
+    "https://gramadosummit.com/",
+    "https://websummit.com/rio/",
 ]
 
-# Cache em memória das oportunidades raspadas na web
+# Caminho oficial do snapshot JSON que mantém as oportunidades e matches ativos até a recarga das 08:00 da manhã.
+# No Vercel o diretório do projeto é somente leitura: grava em /tmp e usa o JSON versionado como semente inicial.
+BUNDLED_DAILY_SCRAPE_JSON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "daily_scrape_08h.json")
+DAILY_SCRAPE_JSON_PATH = os.environ.get("DAILY_SCRAPE_JSON_PATH") or (
+    os.path.join("/tmp", "daily_scrape_08h.json") if IS_SERVERLESS else BUNDLED_DAILY_SCRAPE_JSON_PATH
+)
+
+# Cache em memória das oportunidades raspadas na web (sincronizado com daily_scrape_08h.json até as 08:00)
 _SCRAPED_CACHE: Dict[str, Any] = {
     "timestamp": 0.0,
     "items": [],
 }
-CACHE_TTL_SECONDS = 3600  # 1 hora
+CACHE_TTL_SECONDS = 86400  # 24 horas (mantém ativo até a próxima execução agendada das 08:00)
+
+
+def _load_daily_scrape_json() -> Dict[str, Any]:
+    """Lê o arquivo daily_scrape_08h.json armazenado em disco para manter as oportunidades ativas sem recarregar."""
+    candidate_paths = [DAILY_SCRAPE_JSON_PATH]
+    if BUNDLED_DAILY_SCRAPE_JSON_PATH != DAILY_SCRAPE_JSON_PATH:
+        candidate_paths.append(BUNDLED_DAILY_SCRAPE_JSON_PATH)
+    for path in candidate_paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            print(f"[StartIn IA] Aviso ao carregar {path}: {e}")
+    return {}
+
+
+def _get_latest_08am_boundary(now: Optional[datetime] = None) -> datetime:
+    """Retorna o marco mais recente das 08:00 da manhã (hoje se já passou das 08h, ou ontem às 08h)."""
+    current = now or datetime.now()
+    eight_am = current.replace(hour=8, minute=0, second=0, microsecond=0)
+    if current >= eight_am:
+        return eight_am
+    return eight_am - timedelta(days=1)
+
+
+def _save_daily_scrape_json(
+    scraped_opportunities: Optional[List[Dict[str, Any]]] = None,
+    startup_matches: Optional[List[Dict[str, Any]]] = None,
+    mark_executed: bool = False,
+) -> Dict[str, Any]:
+    """
+    Salva ou atualiza o arquivo daily_scrape_08h.json sempre que a IA for atualizada,
+    preservando as oportunidades raspadas e os matches calculados ativos até a recarga das 08:00.
+    """
+    existing = _load_daily_scrape_json()
+    final_scraped = (
+        scraped_opportunities
+        if scraped_opportunities is not None
+        else existing.get("scrapedOpportunities", [])
+    )
+    final_matches = (
+        startup_matches
+        if startup_matches is not None
+        else existing.get("startupMatches", [])
+    )
+    now_iso = datetime.now().isoformat()
+    payload = {
+        "executedAt": now_iso if mark_executed else (existing.get("executedAt") or now_iso),
+        "updatedAt": now_iso,
+        "scheduledTime": "08:00",
+        "scrapedOpportunities": final_scraped,
+        "startupMatches": final_matches,
+    }
+    try:
+        with open(DAILY_SCRAPE_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[StartIn IA] Aviso ao salvar daily_scrape_08h.json: {e}")
+    return payload
+
+
+def _update_startup_in_daily_json(startup_profile: dict, raw_matches: List[dict], total_analyzed: int) -> None:
+    """
+    Sempre que os matches de uma startup forem calculados ou atualizados pela IA,
+    armazena imediatamente a informação no daily_scrape_08h.json para mantê-la ativa até as 08:00.
+    """
+    if not startup_profile:
+        return
+    sid = startup_profile.get("id")
+    sname = startup_profile.get("name") or "Startup"
+    existing = _load_daily_scrape_json()
+    startup_batches: List[dict] = list(existing.get("startupMatches") or [])
+
+    formatted_matches = []
+    for m in raw_matches:
+        raw_reasons = m.get("reasons") or {}
+        formatted_matches.append({
+            "opportunityId": str(m.get("opportunity_id") or m.get("opportunityId") or ""),
+            "opportunityTitle": m.get("opportunity_title") or m.get("opportunityTitle") or "Oportunidade",
+            "opportunityType": m.get("opportunity_type") or m.get("opportunityType") or "EDITAL",
+            "opportunityDescription": m.get("opportunity_description") or m.get("opportunityDescription") or "",
+            "opportunityMeta": m.get("opportunity_meta") or m.get("opportunityMeta") or "Inscrições abertas · Brasil",
+            "opportunityTags": m.get("opportunity_tags") or m.get("opportunityTags") or "Inovação • Tecnologia",
+            "url": m.get("url") or "",
+            "matchScore": int(m.get("match_score") if m.get("match_score") is not None else (m.get("matchScore") or 80)),
+            "justification": m.get("justification") or "Perfil compatível com os critérios da oportunidade.",
+            "recommendedAction": m.get("recommended_action") or m.get("recommendedAction") or "Submeter candidatura.",
+            "reasons": {
+                "perfil": raw_reasons.get("perfil", "Alinhamento com segmento e mercado"),
+                "requisitos": raw_reasons.get("requisitos", "Requisitos técnicos atendidos"),
+                "objetivo": raw_reasons.get("objetivo", "Objetivo estratégico convergente"),
+                "contexto": raw_reasons.get("contexto", "Modelo operacional compatível"),
+            },
+        })
+
+    new_entry = {
+        "startupId": sid,
+        "startupName": sname,
+        "totalAnalyzed": total_analyzed,
+        "matches": formatted_matches,
+    }
+
+    replaced = False
+    for idx, batch in enumerate(startup_batches):
+        if (sid is not None and str(batch.get("startupId")) == str(sid)) or (
+            batch.get("startupName", "").strip().lower() == sname.strip().lower()
+        ):
+            startup_batches[idx] = new_entry
+            replaced = True
+            break
+    if not replaced:
+        startup_batches.append(new_entry)
+
+    _save_daily_scrape_json(
+        scraped_opportunities=_SCRAPED_CACHE["items"] if _SCRAPED_CACHE["items"] else None,
+        startup_matches=startup_batches,
+    )
 
 
 # =============================================================================
@@ -367,8 +506,319 @@ def fetch_opportunities_from_backend() -> List[Dict[str, Any]]:
 
 
 # =============================================================================
-# 2. RASPAGEM E EXTRAÇÃO DE EDITAIS E EVENTOS REAIS DA WEB COM IA
+# 2. RASPAGEM E EXTRAÇÃO DE EDITAIS E EVENTOS REAIS DA WEB COM IA (DEEP RAG -> ARQUIVO DO EDITAL)
 # =============================================================================
+
+_IGNORED_GENERIC_PDF_TOKENS = (
+    "organograma",
+    "manual_cliente",
+    "manual-cliente",
+    "estatuto",
+    "regimento",
+    "carta_de_servicos",
+    "politica_privacidade",
+    "politica-de-privacidade",
+    "relatorio_gestao",
+)
+
+
+def _is_bare_homepage_or_listing(candidate_url: str) -> bool:
+    """
+    Identifica se uma URL é apenas uma home page genérica ou página de listagem geral,
+    garantindo que o RAG da IA sempre retorne o arquivo do edital (.pdf) ou a página profunda específica.
+    """
+    if not candidate_url or not candidate_url.strip().startswith("http"):
+        return True
+    clean_u = candidate_url.strip().rstrip("/")
+    listing_roots = {u.strip().rstrip("/").lower() for u in DEFAULT_PORTAL_URLS}
+    if clean_u.lower() in listing_roots:
+        return True
+    try:
+        parsed = urlparse(clean_u)
+        path = (parsed.path or "").strip("/")
+        query = (parsed.query or "").strip()
+        if not path and not query:
+            return True
+        if path.lower() in ("pt", "pt-br", "en", "home", "index.html", "index.php", "rio") and not query:
+            return True
+    except Exception:
+        return True
+    return False
+
+
+def _unwrap_embedded_pdf_url(raw_href: str, base_url: str) -> str:
+    """Extrai URLs de PDF embutidas em parâmetros de query (ex.: ?url=https://.../edital.pdf na FAPEMIG)."""
+    full_u = urljoin(base_url, raw_href.strip())
+    try:
+        parsed = urlparse(full_u)
+        qs = parse_qs(parsed.query)
+        for key in ("url", "file", "arquivo", "pdf", "download"):
+            vals = qs.get(key)
+            if vals:
+                inner = unquote(vals[0]).strip()
+                if inner.startswith("http") and ".pdf" in inner.lower():
+                    return inner
+    except Exception:
+        pass
+    return full_u
+
+
+def _find_best_edital_pdf_in_soup(soup: BeautifulSoup, page_url: str) -> Optional[str]:
+    """
+    Vasculha o HTML de uma página oficial em busca do arquivo direto do edital (.pdf),
+    priorizando editais, chamadas públicas, retificações e regulamentos e ignorando manuais genéricos.
+    """
+    candidates = []
+    seen = set()
+    for a_tag in soup.find_all("a", href=True):
+        raw_href = (a_tag.get("href") or "").strip()
+        if not raw_href or raw_href.startswith(("#", "javascript:", "mailto:")):
+            continue
+        resolved = _unwrap_embedded_pdf_url(raw_href, page_url)
+        low_u = resolved.lower()
+        if ".pdf" not in low_u or resolved in seen:
+            continue
+        if any(bad in low_u for bad in _IGNORED_GENERIC_PDF_TOKENS):
+            continue
+        seen.add(resolved)
+        link_text = " ".join(a_tag.stripped_strings).strip()
+        combined = f"{link_text} {low_u}".lower()
+        score = 20
+        if any(k in combined for k in ("edital", "chamada", "regulamento", "selecao", "seleção")):
+            score += 35
+        if any(k in combined for k in ("retificacao", "retificação", "centelha", "pipe", "subvencao", "faperj", "fapemig", "fapesp", "finep", "inova")):
+            score += 20
+        if any(k in low_u for k in ("wp-content/uploads", "/downloads/", "/efpc/", "/edital")):
+            score += 12
+        if any(k in combined for k in ("resultado", "perguntas", "recursos", "classificacao")) and "edital" not in link_text.lower():
+            score -= 15
+        candidates.append((score, resolved))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
+def _resolve_deep_edital_file_url(entry_url: str, fallback_url: str = "") -> str:
+    """
+    Executa RAG profundo dentro dos sites de editais e eventos:
+    1. Se já for um link direto de arquivo .pdf, retorna imediatamente.
+    2. Se for uma página do Capitaai (/captacao/...), entra na página da oportunidade, localiza a página oficial
+       da agência de fomento (FINEP, FAPESP, FAPERJ, FAPEMIG, FAPEAL, FAPES, ANVISA etc.) e vasculha a página
+       oficial para extrair o link direto do arquivo .pdf do edital (ou o link oficial específico do edital).
+    3. Para outros portais, busca dentro da página o arquivo .pdf do edital ou a subpágina oficial de inscrição/regulamento,
+       NUNCA retornando a home page do portal.
+    """
+    target = (entry_url or "").strip()
+    if not target.startswith("http"):
+        return fallback_url or target
+
+    unwrapped = _unwrap_embedded_pdf_url(target, target)
+    if ".pdf" in unwrapped.lower().split("?")[0]:
+        return unwrapped
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+    try:
+        resp = requests.get(target, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # 1. Verifica se o próprio documento já possui o link direto para o arquivo .pdf do edital
+            direct_pdf = _find_best_edital_pdf_in_soup(soup, target)
+            if direct_pdf:
+                return direct_pdf
+
+            # 2. Se estamos em uma página interna do Capitaai (/captacao/...), segue até o órgão oficial para buscar o .pdf
+            if "capitaai.com.br/captacao/" in target.lower():
+                official_candidates = []
+                for a_tag in soup.find_all("a", href=True):
+                    href = (a_tag.get("href") or "").strip()
+                    if not href.startswith("http") or "capitaai.com.br" in href.lower():
+                        continue
+                    low_h = href.lower()
+                    if any(skip in low_h for skip in ("portas.gov.br", "gov.br/agricultura", "linkedin.com", "instagram.com", "facebook.com", "twitter.com", "wa.me")):
+                        continue
+                    txt = " ".join(a_tag.stripped_strings).strip().lower()
+                    sc = 10
+                    if "página oficial" in txt or "pagina oficial" in txt or "edital" in txt or "chamada" in txt:
+                        sc += 30
+                    if not _is_bare_homepage_or_listing(href):
+                        sc += 20
+                    else:
+                        sc -= 25
+                    official_candidates.append((sc, href))
+
+                official_candidates.sort(key=lambda x: x[0], reverse=True)
+                for _, off_url in official_candidates[:2]:
+                    off_unwrapped = _unwrap_embedded_pdf_url(off_url, target)
+                    if ".pdf" in off_unwrapped.lower().split("?")[0]:
+                        return off_unwrapped
+                    try:
+                        r_off = requests.get(off_url, headers=headers, timeout=5)
+                        if r_off.status_code == 200:
+                            s_off = BeautifulSoup(r_off.text, "html.parser")
+                            off_pdf = _find_best_edital_pdf_in_soup(s_off, off_url)
+                            if off_pdf:
+                                return off_pdf
+                    except Exception:
+                        pass
+                    if not _is_bare_homepage_or_listing(off_url):
+                        return off_url
+
+                return target
+
+            # 3. Para outros portais (FINEP, FAPESP, InovaStartups, Eventos), procura subpáginas de edital/regulamento/startups
+            sub_candidates = []
+            for a_tag in soup.find_all("a", href=True):
+                href = (a_tag.get("href") or "").strip()
+                if not href or href.startswith(("#", "javascript:", "mailto:")):
+                    continue
+                full_sub = _unwrap_embedded_pdf_url(href, target)
+                if _is_bare_homepage_or_listing(full_sub):
+                    continue
+                txt = " ".join(a_tag.stripped_strings).strip().lower()
+                comb = f"{txt} {full_sub.lower()}"
+                if any(bad in comb for bad in ("login", "facebook", "instagram", "linkedin", "youtube", "twitter", "privacidade", "cookies")):
+                    continue
+                sc = 0
+                if any(k in comb for k in ("edital", "regulamento", "chamada", "normas", "pipejornada", "subvencao")):
+                    sc += 25
+                if any(k in comb for k in ("startup", "pitch", "inscricao", "inscrição", "programacao", "programação", "inovacao-aberta")):
+                    sc += 15
+                if sc > 0:
+                    sub_candidates.append((sc, full_sub))
+
+            sub_candidates.sort(key=lambda x: x[0], reverse=True)
+            if sub_candidates:
+                best_sub = sub_candidates[0][1]
+                try:
+                    r_sub = requests.get(best_sub, headers=headers, timeout=5)
+                    if r_sub.status_code == 200:
+                        s_sub = BeautifulSoup(r_sub.text, "html.parser")
+                        sub_pdf = _find_best_edital_pdf_in_soup(s_sub, best_sub)
+                        if sub_pdf:
+                            return sub_pdf
+                except Exception:
+                    pass
+                return best_sub
+    except Exception:
+        pass
+
+    if not _is_bare_homepage_or_listing(target):
+        return target
+    return fallback_url or target
+
+
+def _extract_capitaai_opportunities_from_soup(soup: BeautifulSoup, base_url: str, max_items: int = 8) -> List[dict]:
+    """
+    Extrai diretamente os cards de editais abertos do portal Capitaai (https://capitaai.com.br/...),
+    navegando internamente em cada card (/captacao/...) para buscar e retornar o arquivo direto do edital (.pdf)
+    ou a página oficial específica do edital (nunca a home).
+    """
+    extracted: List[dict] = []
+    seen_urls = set()
+
+    for a_tag in soup.find_all("a", href=True):
+        href = (a_tag.get("href") or "").strip()
+        if "/captacao/" not in href:
+            continue
+        full_url = urljoin(base_url, href)
+        if full_url in seen_urls:
+            continue
+
+        parts = [s.strip() for s in a_tag.stripped_strings if s.strip() and s.strip() != "Ver detalhes →"]
+        if len(parts) < 3 or "Aceita:" not in parts:
+            continue
+
+        seen_urls.add(full_url)
+        title = parts[0]
+        agency = parts[1] if len(parts) > 1 and parts[1] not in ("Aceita:", "Prazo:") and not parts[1].startswith("R$") else "Fomento Nacional / Capitaai"
+        budget = next((p for p in parts if p.startswith("R$")), "")
+        prazo_val = "Fluxo Contínuo"
+        if "Prazo:" in parts:
+            p_idx = parts.index("Prazo:")
+            if p_idx + 1 < len(parts):
+                prazo_val = parts[p_idx + 1]
+
+        aceita_val = "empresas, startups"
+        if "Aceita:" in parts:
+            a_idx = parts.index("Aceita:")
+            if a_idx + 1 < len(parts):
+                aceita_val = parts[a_idx + 1]
+
+        low_all = f"{title} {agency} {base_url}".lower()
+        tags_list = ["Capitaai"]
+        if "finep" in low_all:
+            tags_list.append("FINEP")
+        elif "fapesp" in low_all or "pipe" in low_all:
+            tags_list.append("FAPESP PIPE")
+        elif "faperj" in low_all:
+            tags_list.append("FAPERJ")
+        elif "fapemig" in low_all:
+            tags_list.append("FAPEMIG")
+        elif "fapes" in low_all:
+            tags_list.append("FAPES")
+        elif "centelha" in low_all or "fapeal" in low_all:
+            tags_list.append("Programa Centelha")
+        elif "cnpq" in low_all:
+            tags_list.append("CNPq")
+        else:
+            tags_list.append("Subvenção & Fomento")
+
+        if any(k in low_all for k in ["medicamento", "saude", "saúde", "hospital", "vacina", "clinica"]):
+            tags_list.extend(["Saúde & Healthtech", "Biotech"])
+        elif any(k in low_all for k in ["gov", "prefeitura", "publico", "público"]):
+            tags_list.extend(["GovTech", "Inovação Aberta"])
+        elif any(k in low_all for k in ["semicondutor", "mineral", "industria", "indústria", "hardware"]):
+            tags_list.extend(["Indústria 4.0", "Hardware & IA"])
+        elif any(k in low_all for k in ["educac", "ensino"]):
+            tags_list.extend(["Edtech", "Tecnologia"])
+        else:
+            tags_list.extend(["Startups", "Tecnologia & Inovação"])
+
+        state_suffix = "Brasil"
+        if "faperj" in low_all or "rio de janeiro" in low_all:
+            state_suffix = "Rio de Janeiro, RJ · Brasil"
+        elif "fapemig" in low_all or "minas" in low_all:
+            state_suffix = "Minas Gerais, MG · Brasil"
+        elif "fapesp" in low_all or "são paulo" in low_all or "sao paulo" in low_all:
+            state_suffix = "São Paulo, SP · Brasil"
+        elif "fapes " in low_all or "capixaba" in low_all or "espírito santo" in low_all:
+            state_suffix = "Espírito Santo, ES · Brasil"
+        elif "fapeal" in low_all or "alagoas" in low_all:
+            state_suffix = "Alagoas, AL · Brasil"
+        elif "fapesc" in low_all or "santa catarina" in low_all:
+            state_suffix = "Santa Catarina, SC · Brasil"
+        elif "araucária" in low_all or "paraná" in low_all:
+            state_suffix = "Paraná, PR · Brasil"
+
+        budget_info = f" · Recursos: {budget}" if budget else ""
+        deadline_str = f"Prazo: {prazo_val}{budget_info} · {state_suffix}"
+        focus_str = (
+            f"Edital aberto mapeado via Capitaai ({agency}). "
+            f"Elegibilidade: {aceita_val}.{f' Dotação orçamentária: {budget}.' if budget else ''} "
+            f"Voltado a projetos de inovação tecnológica, P&D e desenvolvimento de soluções escaláveis."
+        )
+
+        # Busca dentro da página do edital o arquivo PDF oficial ou link direto do edital
+        deep_edital_url = _resolve_deep_edital_file_url(full_url, fallback_url=full_url)
+
+        extracted.append({
+            "url": deep_edital_url,
+            "title": title,
+            "type": "EDITAL",
+            "focus": focus_str,
+            "deadline": deadline_str,
+            "tags": " • ".join(dict.fromkeys(tags_list)),
+        })
+        if len(extracted) >= max_items:
+            break
+
+    return extracted
+
 
 def fetch_text_from_url(url: str) -> str:
     """
@@ -380,7 +830,7 @@ def fetch_text_from_url(url: str) -> str:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
     try:
-        response = requests.get(url, headers=headers, timeout=3)
+        response = requests.get(url, headers=headers, timeout=7)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
@@ -388,21 +838,6 @@ def fetch_text_from_url(url: str) -> str:
         # Extrai links ANTES de decompor footer e nav, pois muitos editais estão no rodapé ou menus
         candidate_links = []
         seen_hrefs = set()
-        keywords = [
-            "edital",
-            "chamada",
-            "regulamento",
-            "inova-startups",
-            "inova",
-            "pipe",
-            "inscricao",
-            "subvencao",
-            "fapesp",
-            "finep",
-            "programa",
-            "selecao",
-            ".pdf",
-        ]
         for a_tag in soup.find_all("a", href=True):
             href = (a_tag.get("href") or "").strip()
             link_text = " ".join(a_tag.stripped_strings).strip()
@@ -413,25 +848,25 @@ def fetch_text_from_url(url: str) -> str:
                 or href.lower().startswith("mailto:")
             ):
                 continue
-            full_url = urljoin(url, href)
-            if full_url not in seen_hrefs and len(link_text) > 3 and full_url != url and full_url != url.rstrip("/"):
+            full_url = _unwrap_embedded_pdf_url(href, url)
+            if full_url not in seen_hrefs and len(link_text) > 3 and not _is_bare_homepage_or_listing(full_url):
                 seen_hrefs.add(full_url)
                 combined = f"{link_text} {full_url}".lower()
-                score = sum(10 for kw in ["edital", "chamada", "regulamento", ".pdf", "pipe", "inscricao"] if kw in combined)
-                score += sum(3 for kw in ["inova", "subvencao", "fapesp", "finep", "programa"] if kw in combined)
+                score = sum(15 for kw in [".pdf", "edital", "chamada", "captacao", "regulamento", "normas", "pipe", "inscricao"] if kw in combined)
+                score += sum(4 for kw in ["inova", "subvencao", "fapesp", "finep", "programa", "startup", "summit"] if kw in combined)
                 candidate_links.append((score, link_text, full_url))
 
-        # Ordena dando prioridade máxima para links com palavras-chave de editais específicos
+        # Ordena dando prioridade máxima para links com arquivos .pdf e editais específicos
         candidate_links.sort(key=lambda x: x[0], reverse=True)
         extracted_links = [f"- {t}: {u}" for _, t, u in candidate_links[:35]]
 
         for element in soup(["script", "style", "noscript"]):
             element.decompose()
 
-        text = " ".join(soup.stripped_strings)[:4200]
+        text = " ".join(soup.stripped_strings)[:4800]
         links_block = "\n".join(extracted_links[:30])
         if links_block:
-            return f"{text}\n\n[LINKS ESPECÍFICOS DE EDITAIS/EVENTOS ENCONTRADOS NA PÁGINA ({url})]:\n{links_block}"
+            return f"{text}\n\n[LINKS ESPECÍFICOS DE ARQUIVOS DE EDITAIS (.PDF) E PÁGINAS PROFUNDAS ENCONTRADOS EM ({url})]:\n{links_block}"
         return text
     except Exception as e:
         print(f"Erro ao buscar a URL {url}: {e}")
@@ -439,9 +874,93 @@ def fetch_text_from_url(url: str) -> str:
 
 
 def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
-    """Retorna oportunidades com links profundos reais específicos extraídos diretamente do portal ou ecossistema nacional."""
+    """
+    Retorna oportunidades com links profundos diretos para os arquivos de edital (.pdf)
+    ou páginas específicas de submissão/regulamento (NUNCA retornando a home page do portal).
+    """
     domain = url.lower()
-    if "inovastartups" in domain:
+    if "capitaai" in domain:
+        if "saude" in domain:
+            return [
+                {
+                    "url": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirResenhaAnoData&cod_modulo=630&cod_menu=9376",
+                    "title": "Edital de Chamamento N° 7/2026 - Seleção de Projetos de Inovação em Medicamentos e Saúde",
+                    "type": "EDITAL",
+                    "focus": "Edital aberto mapeado via Capitaai voltado a startups, empresas e ICTs com soluções de inovação em saúde, biotecnologia, fármacos e dispositivos médicos.",
+                    "deadline": "Prazo: 23/11/2026 · Brasil",
+                    "tags": "Capitaai • Saúde & Healthtech • Biotech • Inovação",
+                },
+                {
+                    "url": "https://capitaai.com.br/captacao/cepi-tecnologias-analiticas-inovadoras-acelerar-fabricacao-vacinas-ace-selgdv",
+                    "title": "Chamada CEPI 2026 — Tecnologias Analíticas e Digitais para Saúde e Biotecnologia",
+                    "type": "EDITAL",
+                    "focus": "Fomento para empresas e startups de base tecnológica focadas em saúde digital, diagnóstico, bioinformática e automação laboratorial.",
+                    "deadline": "Fluxo Contínuo · Brasil",
+                    "tags": "Capitaai • Healthtech • IA & Dados • Pesquisa",
+                },
+            ]
+        if "tecnologia-e-inovacao" in domain:
+            return [
+                {
+                    "url": "http://www.finep.gov.br/chamadas-publicas/chamadapublica/780",
+                    "title": "Finep Mais Inovação Brasil – Rodada 2 – Tecnologias Digitais, IA e Semicondutores",
+                    "type": "EDITAL",
+                    "focus": "Edital aberto na plataforma Capitaai (Finep) com R$ 100,0 mi para empresas e startups desenvolverem tecnologias de IA, sistemas embarcados, IoT e software avançado.",
+                    "deadline": "Prazo: 25/11/2026 · Recursos: R$ 100,0 mi · Brasil",
+                    "tags": "Capitaai • FINEP • IA & Dados • Hardware & IoT",
+                },
+                {
+                    "url": "https://capitaai.com.br/captacao/edital-chamada-publica-fapesc-542024-programa-inova-talentos-k16pvc",
+                    "title": "Edital Programa Inova Talentos & Inovação Tecnológica em Empresas (Capitaai)",
+                    "type": "EDITAL",
+                    "focus": "Apoio à alocação de especialistas e desenvolvimento de projetos de PD&I e transformação digital em startups e empresas inovadoras.",
+                    "deadline": "Fluxo Contínuo · Brasil",
+                    "tags": "Capitaai • Inovação Tecnológica • SaaS B2B • P&D",
+                },
+            ]
+        return [
+            {
+                "url": "https://www.finep.gov.br/e/chamada-publica/222684/1060720",
+                "title": "Seleção Pública MCTI/Finep/FNDCT de Subvenção Econômica: Finep COOPERAMAIS Brasil Startups",
+                "type": "EDITAL",
+                "focus": "Edital aberto no Capitaai com R$ 20,0 mi em subvenção econômica (Finep/MCTI) para startups e empresas de base tecnológica desenvolverem soluções inovadoras B2B e SaaS.",
+                "deadline": "Fluxo Contínuo · Recursos: R$ 20,0 mi · Brasil",
+                "tags": "Capitaai • FINEP • Subvenção • Startups • Tecnologia",
+            },
+            {
+                "url": "https://www.faperj.br/rp/downloads/Edital_FAPPERJ_N%C2%BA_26_2026_%E2%80%93_Bolsa_de_Inova%C3%A7%C3%A3o_Tecnol%C3%B3gica_(INT).pdf",
+                "title": "Edital FAPERJ Nº 26/2026 - Programa Bolsa de Inovação Tecnológica para Startups",
+                "type": "EDITAL",
+                "focus": "Fomento mapeado pelo Capitaai para startups e empresas de tecnologia acelerarem projetos de pesquisa aplicada, inteligência artificial e transformação digital.",
+                "deadline": "Prazo: 27/11/2026 · Rio de Janeiro, RJ · Brasil",
+                "tags": "Capitaai • FAPERJ • Inovação Tecnológica • Startups",
+            },
+            {
+                "url": "https://api.site.fapemig.br/wp-content/uploads/2026-10-09__195__12819__sei_150716523_edital_fapemig_sede___018_2026___hubmg_gov__Am0Er84Q.pdf",
+                "title": "Chamada FAPEMIG SEDE 018/2026 - HUBMG GOV Inovação Aberta",
+                "type": "EDITAL",
+                "focus": "Chamada pública com R$ 2,0 mi mapeada via Capitaai para contratação e fomento de soluções inovadoras de startups e empresas voltadas à eficiência operacional e GovTech.",
+                "deadline": "Prazo: 09/12/2026 · Recursos: R$ 2,0 mi · Minas Gerais, MG · Brasil",
+                "tags": "Capitaai • FAPEMIG • GovTech • Inovação Aberta • B2B",
+            },
+            {
+                "url": "https://www.fapeal.br/wp-content/uploads/2026/10/V.03.-Edital-FAPEAL-no-06.2026-Centelha-3-AL-2a-Retificacao_resulatdo-Fase-1-em-13.11.2026.pdf",
+                "title": "Edital Nº 06/2026 – Programa Nacional de Apoio à Geração de Empreendimentos Inovadores (Centelha 3)",
+                "type": "EDITAL",
+                "focus": "Recursos de subvenção econômica mapeados no Capitaai para impulsionar startups em fase de validação e tração com produtos tecnológicos escaláveis.",
+                "deadline": "Fluxo Contínuo · Brasil",
+                "tags": "Capitaai • Programa Centelha • Subvenção • Startups",
+            },
+            {
+                "url": "https://www.fapes.es.gov.br/edital/10-2026",
+                "title": "Edital Fapes nº 10/2026 - Programa Empreendedor Inovador (2ª Chamada)",
+                "type": "EDITAL",
+                "focus": "Apoio financeiro de R$ 355 mil via Capitaai/Fapes para desenvolvimento de MVPs, validação comercial e aceleração de startups inovadoras.",
+                "deadline": "Prazo: 16/12/2026 · Recursos: R$ 355 mil · Espírito Santo, ES · Brasil",
+                "tags": "Capitaai • FAPES • Startups • Empreendedorismo • MVP",
+            },
+        ]
+    elif "inovastartups" in domain:
         return [
             {
                 "url": "https://inovastartups.com.br/edital-inova-6a-edicao.pdf",
@@ -463,7 +982,7 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
     elif "fapesp" in domain:
         return [
             {
-                "url": "https://fapesp.br/pipe/jornada-tecnologica-2026-fase-1",
+                "url": "https://fapesp.br/pipe/normas/",
                 "title": "Chamada PIPE Jornada Tecnológica 2026 - Fase 1 (FAPESP)",
                 "type": "EDITAL",
                 "focus": "Financiamento não reembolsável da FAPESP para validação de viabilidade técnico-científica de startups inovadoras.",
@@ -471,7 +990,7 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
                 "tags": "FAPESP • PIPE • Fase 1 • Subvenção",
             },
             {
-                "url": "https://fapesp.br/pipe/jornada-futuro-2026",
+                "url": "https://fapesp.br/pipejornada",
                 "title": "Chamada PIPE Indústria do Futuro 2026 (FAPESP)",
                 "type": "EDITAL",
                 "focus": "Apoio a pesquisas aplicadas para empresas com soluções de inteligência artificial, dados e robótica avançada.",
@@ -482,7 +1001,7 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
     elif "finep" in domain:
         return [
             {
-                "url": "https://legacy.finep.gov.br/a-finep-externo/edital-efpc",
+                "url": "https://legacy.finep.gov.br/images/a-finep/EFPC/19_12_2025_EFPC_Edital_Rerratificado.pdf",
                 "title": "Chamada Pública FINEP Mais Inovação Brasil 2026",
                 "type": "EDITAL",
                 "focus": "Recursos de subvenção econômica FINEP para conexão entre entidades fechadas e startups de tecnologia e inovação.",
@@ -490,10 +1009,54 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
                 "tags": "FINEP • Subvenção • Inovação Aberta • B2B",
             }
         ]
+    elif "portodigital" in domain:
+        return [
+            {
+                "url": "https://portodigital.org/noticia/recnplay-capitulo-saude-conecta-os-ecossistemas-de-saude-e-tecnologia-do-recife-confira-a-programacao/",
+                "title": "Ciclo de Inovação Aberta & Conexão Corporativa Porto Digital 2026",
+                "type": "EVENTO",
+                "focus": "Encontros técnicos, desafios de inovação aberta, mentorias e rodadas de negócios para startups residentes e conectadas ao ecossistema do Porto Digital.",
+                "deadline": "Agenda Contínua 2026 · Recife/PE · Presencial & Online",
+                "tags": "Porto Digital • Recife • Inovação Aberta • Startups • B2B",
+            }
+        ]
+    elif "gramadosummit" in domain:
+        return [
+            {
+                "url": "https://gramadosummit.com/lp-startup",
+                "title": "Gramado Summit 2026 — Feira de Startups, Inovação e Venture Capital",
+                "type": "EVENTO",
+                "focus": "Um dos maiores eventos de brainstorming e conexão da América Latina, reunindo startups em validação e tração, investidores anjo, fundos de VC e executivos corporativos.",
+                "deadline": "Inscrições abertas · Gramado/RS · Presencial",
+                "tags": "Gramado Summit • Venture Capital • Batalha de Startups • B2B",
+            }
+        ]
+    elif "websummit" in domain:
+        return [
+            {
+                "url": "https://rio.websummit.com/pt-br/startups/pitch/",
+                "title": "Web Summit Rio 2026 — Programa Alpha & Beta para Startups",
+                "type": "EVENTO",
+                "focus": "Conferência global de tecnologia e inovação no Rio de Janeiro conectando startups brasileiras e globais a fundos internacionais, grandes empresas e imprensa especializada.",
+                "deadline": "Inscrições abertas · Rio de Janeiro/RJ · Presencial",
+                "tags": "Web Summit Rio • Global • Investidores • IA & SaaS • Startups",
+            }
+        ]
+    elif "startupsummit" in domain:
+        return [
+            {
+                "url": "https://www.startupsummit.com.br/ingressos",
+                "title": "Startup Summit 2026 — Sebrae Startups & ACATE",
+                "type": "EVENTO",
+                "focus": "Encontro nacional de startups, fundos de Venture Capital e ecossistema corporativo com foco em escala, negócios e conexões de impacto.",
+                "deadline": "26 a 28 de Agosto de 2026 · Florianópolis/SC · Híbrido",
+                "tags": "Sebrae • ACATE • Investimentos • Rodada de Negócios • B2B",
+            }
+        ]
     elif "recnplay" in domain or "evento" in domain:
         return [
             {
-                "url": "https://recnplay.pe/",
+                "url": "https://recnplay.pe/recnplay-estreia-programacao-de-cinema-de-rua-com-mais-de-30-curtas-pernambucanos-e-o-agente-secreto/",
                 "title": "REC'n'Play 2026 — Festival de Tecnologia, Inovação e Negócios (Porto Digital)",
                 "type": "EVENTO",
                 "focus": "Maior festival de inovação e tecnologia do Nordeste, conectando startups a corporações, pitches e rodadas de negócios no ecossistema Porto Digital.",
@@ -501,7 +1064,7 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
                 "tags": "Porto Digital • REC'n'Play • Startups • Conexão B2B • Inovação",
             },
             {
-                "url": "https://www.startupsummit.com.br/",
+                "url": "https://www.startupsummit.com.br/ingressos",
                 "title": "Startup Summit 2026 — Sebrae Startups & ACATE",
                 "type": "EVENTO",
                 "focus": "Encontro nacional de startups, fundos de Venture Capital e ecossistema corporativo com foco em escala, negócios e conexões de impacto.",
@@ -511,7 +1074,7 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
         ]
     return [
         {
-            "url": "https://recnplay.pe/",
+            "url": "https://recnplay.pe/recnplay-estreia-programacao-de-cinema-de-rua-com-mais-de-30-curtas-pernambucanos-e-o-agente-secreto/",
             "title": "REC'n'Play 2026 — Festival de Tecnologia, Inovação e Negócios (Porto Digital)",
             "type": "EVENTO",
             "focus": "Arena de conexões, negócios e pitches para startups de tecnologia com investidores e grandes empresas.",
@@ -519,7 +1082,7 @@ def get_default_deep_opportunities(url: str, raw_text: str = "") -> List[dict]:
             "tags": "Porto Digital • Evento • Startups • Inovação",
         },
         {
-            "url": url,
+            "url": _resolve_deep_edital_file_url(url, "https://inovastartups.com.br/edital-inova-6a-edicao.pdf"),
             "title": f"Chamada Pública de Inovação ({url.split('//')[-1].split('/')[0]})",
             "type": "EDITAL",
             "focus": raw_text[:300] if raw_text else "Edital de fomento à inovação tecnológica e validação de produtos.",
@@ -533,7 +1096,8 @@ def extract_opportunities_from_text(raw_text: str, url: str) -> List[dict]:
     """
     A IA analisa o texto bruto e o índice RAG de links raspados de um portal real
     (InovaStartups, FAPESP PIPE, FINEP) e extrai oportunidades/editais reais
-    contidos na página em formato JSON, garantindo que o link seja o link DIRETO do edital aberto.
+    contidos na página em formato JSON, garantindo que o link seja o arquivo DIRETO do edital (.pdf)
+    ou a subpágina oficial específica do edital (nunca a home).
     """
     if not raw_text:
         return get_default_deep_opportunities(url, "")
@@ -550,13 +1114,13 @@ def extract_opportunities_from_text(raw_text: str, url: str) -> List[dict]:
     Extraia de 1 a 3 oportunidades reais encontradas nesse conteúdo.
     DIRETRIZES FUNDAMENTAIS:
     1. TÍTULO ESPECÍFICO: O título DEVE ser o nome exato e oficial do edital ou chamada pública (exemplo: "Inova Startups 6ª ed - 2026", "FAPESP PIPE Fase 1 - 2026", "FINEP Tecnova III"), NUNCA use termos vagos ou genéricos como "Edital de Inovação".
-    2. URL DIRETA E PROFUNDA: Preencha o campo "url" com o link direto mais específico encontrado na lista [LINKS ESPECÍFICOS DE EDITAIS/EVENTOS ENCONTRADOS NA PÁGINA] para aquele edital (NUNCA utilize a home do portal se houver link de PDF, edital, chamada ou regulamento).
+    2. ARQUIVO DO EDITAL (.PDF) OU URL DIRETA E PROFUNDA: Preencha o campo "url" priorizando o arquivo direto do edital (.pdf) ou o link específico da chamada encontrado em [LINKS ESPECÍFICOS DE ARQUIVOS DE EDITAIS (.PDF) E PÁGINAS PROFUNDAS ENCONTRADOS] (É PROIBIDO retornar a home do portal!).
 
     Retorne ESTRITAMENTE um JSON válido com a chave "opportunities" contendo uma lista de objetos no seguinte formato:
     {{
       "opportunities": [
         {{
-          "url": "https://link-especifico-do-edital-ou-evento...",
+          "url": "https://link-direto-do-arquivo-pdf-ou-edital...",
           "title": "Nome oficial e específico do Edital, Chamada Pública ou Evento (ex: Inova Startups 6ª ed - 2026)",
           "type": "EDITAL ou EVENTO ou POC",
           "focus": "Descrição detalhada do objetivo do edital/programa, quem pode participar e áreas apoiadas",
@@ -573,7 +1137,7 @@ def extract_opportunities_from_text(raw_text: str, url: str) -> List[dict]:
             messages=[
                 {
                     "role": "system",
-                    "content": "Você é um especialista em editais de fomento (FINEP, FAPESP, SEBRAE, InovaStartups). Extraia apenas editais e programas reais do texto fornecido com seus links diretos oficiais e responda estritamente com JSON válido.",
+                    "content": "Você é um especialista em editais de fomento (FINEP, FAPESP, SEBRAE, InovaStartups). Extraia apenas editais e programas reais do texto fornecido com seus links diretos de arquivo PDF ou chamada oficial (nunca a home) e responda estritamente com JSON válido.",
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -587,10 +1151,11 @@ def extract_opportunities_from_text(raw_text: str, url: str) -> List[dict]:
             default_deep = get_default_deep_opportunities(url, raw_text)
             for idx, o in enumerate(opps):
                 link = (o.get("url") or "").strip()
-                # Se a IA retornou a raiz da home, substitui pelo link profundo correspondente
-                if not link or link == url or link == url.rstrip("/") or not link.startswith("http"):
-                    fallback_link = default_deep[idx % len(default_deep)]["url"] if default_deep else url
+                fallback_link = default_deep[idx % len(default_deep)]["url"] if default_deep else url
+                if _is_bare_homepage_or_listing(link):
                     o["url"] = fallback_link
+                else:
+                    o["url"] = _resolve_deep_edital_file_url(link, fallback_url=fallback_link)
                 cleaned.append(o)
             return cleaned
     except Exception as e:
@@ -603,7 +1168,7 @@ def extract_opportunity_from_text(raw_text: str, url: str) -> dict:
     """Mantido por compatibilidade: retorna a primeira oportunidade extraída da URL."""
     items = extract_opportunities_from_text(raw_text, url)
     return items[0] if items else {
-        "url": url,
+        "url": _resolve_deep_edital_file_url(url),
         "title": "Oportunidade de Inovação",
         "type": "EDITAL",
         "focus": raw_text[:250] if raw_text else "Oportunidade capturada da web",
@@ -614,18 +1179,47 @@ def extract_opportunity_from_text(raw_text: str, url: str) -> dict:
 
 def scrape_real_web_opportunities(urls: Optional[List[str]] = None, force_refresh: bool = False) -> List[Dict[str, Any]]:
     """
-    Raspa os portais oficiais de editais (InovaStartups, FAPESP PIPE, FINEP)
-    e retorna a lista de oportunidades reais estruturadas em JSON pela IA.
+    Raspa os portais oficiais de editais (Capitaai, InovaStartups, FAPESP PIPE, FINEP, Eventos)
+    buscando o arquivo direto do edital (.pdf) ou subpágina específica dentro dos sites,
+    armazena o resultado no daily_scrape_08h.json e reutiliza esse JSON ativo até a recarga das 08:00.
     """
     now = time.time()
-    if not force_refresh and not urls and _SCRAPED_CACHE["items"] and (now - _SCRAPED_CACHE["timestamp"] < CACHE_TTL_SECONDS):
-        return _SCRAPED_CACHE["items"]
+    if not force_refresh and not urls:
+        # 1. Usa cache em memória se já carregado
+        if _SCRAPED_CACHE["items"] and (now - _SCRAPED_CACHE["timestamp"] < CACHE_TTL_SECONDS):
+            return _SCRAPED_CACHE["items"]
+
+        # 2. Usa o JSON armazenado (daily_scrape_08h.json) para manter as oportunidades ativas até as 08:00 da manhã
+        stored_json = _load_daily_scrape_json()
+        stored_opps = stored_json.get("scrapedOpportunities")
+        if isinstance(stored_opps, list) and len(stored_opps) > 0:
+            has_homepage_only = any(
+                _is_bare_homepage_or_listing(str(it.get("externalUrl") or it.get("url") or ""))
+                for it in stored_opps
+            )
+            if not has_homepage_only:
+                _SCRAPED_CACHE["timestamp"] = now
+                _SCRAPED_CACHE["items"] = stored_opps
+                return stored_opps
 
     target_urls = urls or DEFAULT_PORTAL_URLS
     scraped_list: List[Dict[str, Any]] = []
 
     def _process_single_url(target_u: str) -> List[dict]:
         try:
+            if "capitaai" in target_u.lower():
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                }
+                resp = requests.get(target_u, headers=headers, timeout=7)
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    max_cards = 8 if "para-startup" in target_u.lower() else 5
+                    live_cards = _extract_capitaai_opportunities_from_soup(soup, target_u, max_items=max_cards)
+                    if live_cards:
+                        return live_cards
+                return get_default_deep_opportunities(target_u, "")
+
             raw_text = fetch_text_from_url(target_u)
             if not raw_text:
                 return get_default_deep_opportunities(target_u, "")
@@ -634,17 +1228,23 @@ def scrape_real_web_opportunities(urls: Optional[List[str]] = None, force_refres
         except Exception:
             return get_default_deep_opportunities(target_u, "")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(target_urls))) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(target_urls))) as executor:
         results = list(executor.map(_process_single_url, target_urls))
 
+    seen_titles = set()
     for extracted_items in results:
         for item in extracted_items:
             title = (item.get("title") or "").strip()
-            if not title:
+            if not title or title.lower() in seen_titles:
                 continue
+            seen_titles.add(title.lower())
             opp_type = (item.get("type") or "EDITAL").upper()
             if opp_type not in ("EDITAL", "EVENTO", "POC", "COMPRA"):
                 opp_type = "EVENTO" if "evento" in opp_type.lower() or "summit" in title.lower() or "play" in title.lower() else "EDITAL"
+
+            raw_link = (item.get("url") or item.get("externalUrl") or "").strip()
+            if _is_bare_homepage_or_listing(raw_link):
+                raw_link = _resolve_deep_edital_file_url(raw_link)
 
             scraped_list.append({
                 "id": f"web-{len(scraped_list) + 1}",
@@ -654,8 +1254,8 @@ def scrape_real_web_opportunities(urls: Optional[List[str]] = None, force_refres
                 "description": item.get("focus") or item.get("description") or "Oportunidade capturada da web pela IA.",
                 "shortDescription": (item.get("focus") or item.get("description") or "")[:120],
                 "tags": item.get("tags") or f"Web • {opp_type.capitalize()} • Inovação",
-                "url": item.get("url") or item.get("externalUrl") or "",
-                "externalUrl": item.get("url") or item.get("externalUrl") or "",
+                "url": raw_link,
+                "externalUrl": raw_link,
                 "deadline": item.get("deadline") or "Inscrições abertas · Brasil",
                 "meta": item.get("deadline") or "Inscrições abertas · Brasil",
                 "metaInfo": item.get("deadline") or "Inscrições abertas · Brasil",
@@ -702,6 +1302,8 @@ def scrape_real_web_opportunities(urls: Optional[List[str]] = None, force_refres
     if not urls and scraped_list:
         _SCRAPED_CACHE["timestamp"] = now
         _SCRAPED_CACHE["items"] = scraped_list
+        # Persiste imediatamente no daily_scrape_08h.json para manter as oportunidades ativas até as 08:00 da manhã
+        _save_daily_scrape_json(scraped_opportunities=scraped_list)
 
     return scraped_list
 
@@ -1496,11 +2098,12 @@ def evaluate_startup_matches(
     opportunities: Optional[List[dict]] = None,
     startup_id: Optional[int] = None,
     user_id: Optional[int] = None,
+    persist_json: bool = True,
 ) -> dict:
     """
     Lê os dados reais do usuário e da startup vindos do Backend Spring Boot
     e realiza o cálculo de match auditado (40% Área | 30% Tecnologias | 30% Demais Critérios)
-    contra as oportunidades (do banco + raspadas da web).
+    contra as oportunidades (do banco + raspadas da web), armazenando a informação no JSON ativo até as 08:00.
     """
     if not startup_profile or (not startup_profile.get("description") and not startup_profile.get("problem")):
         fetched = fetch_user_and_startup_from_backend(
@@ -1561,7 +2164,10 @@ def evaluate_startup_matches(
         })
 
     if not client:
-        return fallback_evaluate_matches(startup_profile, opportunities, audit_by_key)
+        fallback_res = fallback_evaluate_matches(startup_profile, opportunities, audit_by_key)
+        if persist_json:
+            _update_startup_in_daily_json(startup_profile, fallback_res.get("matches", []), len(opportunities))
+        return fallback_res
 
     profile_dossier = _format_profile_for_prompt(startup_profile)
 
@@ -1667,11 +2273,16 @@ def evaluate_startup_matches(
                     final_matches.extend(fallback_single)
 
             final_matches.sort(key=lambda x: x["match_score"], reverse=True)
+            if persist_json:
+                _update_startup_in_daily_json(startup_profile, final_matches, len(opportunities))
             return {"matches": final_matches}
     except Exception as e:
         print(f"Aviso na chamada da Groq para matchmaking auditado: {e}. Usando cálculo determinístico auditado.")
 
-    return fallback_evaluate_matches(startup_profile, opportunities, audit_by_key)
+    fallback_res = fallback_evaluate_matches(startup_profile, opportunities, audit_by_key)
+    if persist_json:
+        _update_startup_in_daily_json(startup_profile, fallback_res.get("matches", []), len(opportunities))
+    return fallback_res
 
 
 def fallback_evaluate_matches(
@@ -2174,7 +2785,7 @@ def run_daily_scrape_and_match_job(send_to_backend: bool = True) -> Dict[str, An
     for st in startups:
         sid = st.get("id")
         sname = st.get("name") or "Startup"
-        eval_res = evaluate_startup_matches(startup_profile=st, opportunities=combined_opps)
+        eval_res = evaluate_startup_matches(startup_profile=st, opportunities=combined_opps, persist_json=False)
         raw_matches = eval_res.get("matches", [])
 
         formatted_matches = []
@@ -2213,13 +2824,12 @@ def run_daily_scrape_and_match_job(send_to_backend: bool = True) -> Dict[str, An
         "startupMatches": startup_matches_payload,
     }
 
-    # Salva snapshot local do JSON gerado às 08h
-    try:
-        snapshot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "daily_scrape_08h.json")
-        with open(snapshot_path, "w", encoding="utf-8") as f:
-            json.dump(daily_json, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"Aviso ao salvar snapshot JSON local: {e}")
+    # Salva snapshot local do JSON gerado às 08h para manter as oportunidades ativas até a próxima execução
+    daily_json = _save_daily_scrape_json(
+        scraped_opportunities=scraped_opportunities,
+        startup_matches=startup_matches_payload,
+        mark_executed=True,
+    )
 
     # Envia o JSON diretamente para o Backend Spring Boot persistir no banco MySQL
     if send_to_backend:
@@ -2231,6 +2841,42 @@ def run_daily_scrape_and_match_job(send_to_backend: bool = True) -> Dict[str, An
             print(f"Aviso ao sincronizar JSON das 08:00 com o Backend ({sync_url}): {e}")
 
     return daily_json
+
+
+def get_active_or_refresh_daily_json(send_to_backend: bool = True, force_refresh: bool = False) -> Dict[str, Any]:
+    """
+    Reaproveita o daily_scrape_08h.json existente caso ainda esteja no mesmo ciclo diário (antes da próxima recarga das 08h)
+    e com links profundos de editais/PDFs, evitando re-raspar a web a cada reinício.
+    """
+    if not force_refresh:
+        stored = _load_daily_scrape_json()
+        opps = stored.get("scrapedOpportunities") or []
+        executed_at_str = str(stored.get("executedAt") or stored.get("updatedAt") or "").strip()
+        is_current_cycle = False
+        if executed_at_str:
+            try:
+                executed_dt = datetime.fromisoformat(executed_at_str.replace("Z", "+00:00"))
+                if executed_dt.tzinfo is not None:
+                    executed_dt = executed_dt.replace(tzinfo=None)
+                is_current_cycle = executed_dt >= _get_latest_08am_boundary()
+            except Exception:
+                is_current_cycle = False
+
+        has_bare_home = any(
+            _is_bare_homepage_or_listing(str(it.get("externalUrl") or it.get("url") or ""))
+            for it in opps
+        )
+        if isinstance(opps, list) and len(opps) > 0 and is_current_cycle and not has_bare_home:
+            _SCRAPED_CACHE["timestamp"] = time.time()
+            _SCRAPED_CACHE["items"] = opps
+            if send_to_backend:
+                try:
+                    requests.post(f"{BACKEND_API_URL}/ai/daily-sync", json=stored, timeout=20)
+                except Exception as e:
+                    print(f"[StartIn IA] Aviso ao reenviar JSON ativo ao backend: {e}")
+            return stored
+
+    return run_daily_scrape_and_match_job(send_to_backend=send_to_backend)
 
 
 # =============================================================================

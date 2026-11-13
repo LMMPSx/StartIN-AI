@@ -5,7 +5,7 @@ import threading
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import List, Any, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
@@ -31,8 +31,10 @@ from IA import (
     fetch_user_and_startup_from_backend,
     fetch_opportunities_from_backend,
     run_daily_scrape_and_match_job,
+    get_active_or_refresh_daily_json,
     client,
     MODEL_NAME,
+    BACKEND_API_URL,
 )
 
 # Controle do agendador diário das 08:00 da manhã
@@ -49,6 +51,14 @@ def _daily_08am_scheduler_loop():
     """
     global _LAST_EXECUTED_DATE
     print("[StartIn IA] Agendador automático (08:00 da manhã — PRO Diário / FREE Semanal) iniciado.")
+    # Na inicialização, reutiliza o JSON ativo (daily_scrape_08h.json) se já estiver atualizado hoje, ou executa o RAG profundo
+    _SCHEDULER_STOP_EVENT.wait(3)
+    if not _SCHEDULER_STOP_EVENT.is_set():
+        try:
+            print("[StartIn IA] Verificando snapshot JSON ativo das oportunidades de editais e eventos...")
+            get_active_or_refresh_daily_json(send_to_backend=True, force_refresh=False)
+        except Exception as e:
+            print(f"[StartIn IA] Aviso na carga inicial do JSON ativo: {e}")
     while not _SCHEDULER_STOP_EVENT.is_set():
         now = datetime.now()
         today_str = now.strftime("%Y-%m-%d")
@@ -65,10 +75,30 @@ def _daily_08am_scheduler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler_thread = threading.Thread(target=_daily_08am_scheduler_loop, daemon=True)
-    scheduler_thread.start()
+    # No Vercel (serverless) não existe processo contínuo: o agendador interno fica desligado e a rotina
+    # das 08:00 é disparada pelo @Scheduled do Backend no Railway (GET /api/ai/daily-scrape-json)
+    # ou pelo endpoint /api/ai/cron/daily.
+    if _INTERNAL_SCHEDULER_ENABLED:
+        scheduler_thread = threading.Thread(target=_daily_08am_scheduler_loop, daemon=True)
+        scheduler_thread.start()
+    else:
+        print("[StartIn IA] Ambiente serverless detectado: agendador interno desativado (rotina das 08:00 via Backend/Cron).")
     yield
     _SCHEDULER_STOP_EVENT.set()
+
+
+def _env_flag(name: str) -> Optional[bool]:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
+_IS_SERVERLESS = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+_SCHEDULER_FLAG = _env_flag("ENABLE_INTERNAL_SCHEDULER")
+_INTERNAL_SCHEDULER_ENABLED = _SCHEDULER_FLAG if _SCHEDULER_FLAG is not None else not _IS_SERVERLESS
 
 
 app = FastAPI(
@@ -303,17 +333,40 @@ def health_check():
         },
         "dailySchedule": "08:00",
         "lastDailyRun": _LAST_EXECUTED_DATE,
+        "runtime": "vercel-serverless" if _IS_SERVERLESS else "server",
+        "internalScheduler": _INTERNAL_SCHEDULER_ENABLED,
+        "backendApiUrl": BACKEND_API_URL,
+    }
+
+
+@app.get("/api/ai/cron/daily")
+def daily_cron_endpoint(authorization: Optional[str] = Header(default=None)):
+    """
+    Gatilho da rotina das 08:00 para ambientes serverless (Vercel Cron ou chamada manual).
+    Se CRON_SECRET estiver definido, exige o cabeçalho "Authorization: Bearer <CRON_SECRET>".
+    Reaproveita o JSON ativo do ciclo atual ou executa o RAG profundo e envia o resultado ao Backend.
+    """
+    secret = (os.environ.get("CRON_SECRET") or "").strip()
+    if secret and authorization != f"Bearer {secret}":
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    result = get_active_or_refresh_daily_json(send_to_backend=True, force_refresh=False)
+    return {
+        "status": "OK",
+        "executedAt": result.get("executedAt"),
+        "updatedAt": result.get("updatedAt"),
+        "scrapedOpportunities": len(result.get("scrapedOpportunities") or []),
+        "startupMatches": len(result.get("startupMatches") or []),
     }
 
 
 @app.get("/api/ai/daily-scrape-json")
 @app.post("/api/ai/daily-scrape-json")
-def daily_scrape_and_match_json_endpoint():
+def daily_scrape_and_match_json_endpoint(forceRefresh: bool = False):
     """
-    Executa a raspagem completa de editais na web e o cálculo de matches para as startups,
-    retornando o JSON estruturado para ser persistido no banco de dados MySQL.
+    Retorna o JSON estruturado (daily_scrape_08h.json) mantendo as oportunidades ativas até a recarga das 08:00
+    ou executa uma nova varredura completa quando forceRefresh=True.
     """
-    return run_daily_scrape_and_match_job(send_to_backend=False)
+    return get_active_or_refresh_daily_json(send_to_backend=False, force_refresh=forceRefresh)
 
 
 @app.post("/api/ai/match", response_model=MatchResponse)

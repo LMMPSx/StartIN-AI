@@ -100,3 +100,17 @@ python -m py_compile IA.py server.py
 | `POST` | `/api/ai/verify-traction-pdf` | Audita o PDF de Atestado de Capacidade Tecnica junto a escala TRL da NASA (`1-9`) |
 | `POST` | `/api/ai/scrape-opportunities` | Executa raspagem sob demanda dos portais oficiais de editais com deep links |
 | `GET`/`POST` | `/api/ai/daily-scrape-json` | Dispara a rotina de scraping e matchmaking auditado das 08:00 (respeitando o filtro de plano Pro/Free) |
+
+
+---
+
+## Deploy no Vercel (Serverless)
+
+- Root Directory no Vercel: `StartIN-IA-main` (preset `Other`).
+- `api/index.py` expoe o `app` FastAPI de `server.py`; o `vercel.json` reescreve todas as rotas para ele com `maxDuration` de 300 s.
+- Variaveis de ambiente: `GROQ_API_KEY`, `BACKEND_API_URL` (URL do backend no Railway), opcionais `GROQ_MODEL` e `CRON_SECRET` (modelo em `.env.example`).
+- No Vercel o agendador interno fica desligado; a rotina das 08:00 e disparada pelo backend no Railway (`GET /api/ai/daily-scrape-json`) ou por `GET /api/ai/cron/daily`.
+- O `daily_scrape_08h.json` e gravado em `/tmp` no Vercel; o arquivo versionado serve de semente inicial.
+- Localmente a chave Groq fica em `.env` (ignorado pelo Git).
+
+Passo a passo completo: [../DEPLOY.md](../DEPLOY.md).
